@@ -1,0 +1,36 @@
+{
+  "name": "options-mode",
+  "version": "0.9.0",
+  "description": "Options mode: choice-prompt enforcement hooks for Claude Code and repo-local Codex sessions",
+  "author": {
+    "name": "Evyatar Mitrani",
+    "url": "https://github.com/gim-home"
+  },
+  "homepage": "https://github.com/gim-home/ai-developer-toolkit/tree/main/plugins/options-mode",
+  "repository": "https://github.com/gim-home/ai-developer-toolkit",
+  "keywords": [
+    "plugin",
+    "options-mode",
+    "hooks",
+    "ask-user"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Options Mode",
+    "shortDescription": "Enforce choice prompts when an agent needs user input.",
+    "longDescription": "Options Mode enforces choice-prompt mode in Claude Code via SessionStart rule injection, a `/options-mode on|off|status` slash command, and a deterministic Stop-hook tag protocol; repo-local Codex sessions get SessionStart context injection.",
+    "developerName": "Evyatar Mitrani",
+    "category": "Productivity",
+    "capabilities": [
+      "Write"
+    ],
+    "brandColor": "#2563EB",
+    "defaultPrompt": [
+      "Use options mode for this task.",
+      "Ask me with structured choices whenever you need input."
+    ],
+    "websiteURL": "https://github.com/gim-home/ai-developer-toolkit/tree/main/plugins/options-mode",
+    "privacyPolicyURL": "https://openai.com/policies/row-privacy-policy/",
+    "termsOfServiceURL": "https://openai.com/policies/row-terms-of-use/"
+  }
+}

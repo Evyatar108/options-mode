@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Check review status."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Codex review still running. Wait or proceed?\n<options-mode>no-question</options-mode>"}]},"uuid":"assistant-ralph-polling-with-tag"}

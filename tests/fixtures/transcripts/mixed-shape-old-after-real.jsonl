@@ -1,0 +1,4 @@
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"real shape earlier"}]},"uuid":"real-shape-earlier"}
+{"role":"user","content":"follow up"}
+{"role":"assistant","content":[{"type":"text","text":"old shape last no tag"}],"uuid":"old-shape-last"}

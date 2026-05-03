@@ -1,0 +1,9 @@
+{
+  "name": "options-mode",
+  "description": "Options mode: choice-prompt enforcement hooks for Claude Code and repo-local Codex sessions",
+  "version": "0.9.0",
+  "author": {
+    "name": "Evyatar Mitrani"
+  },
+  "keywords": ["options-mode", "hooks", "prompts", "ask-user"]
+}

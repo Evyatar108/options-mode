@@ -1,0 +1,3 @@
+not json
+{"role":"assistant","content":"Would you like option A or option B?"}
+{"role":"user","content":"ignore later user"}

@@ -1,0 +1,15 @@
+{
+  "name": "options-mode",
+  "owner": { "name": "Evyatar Mitrani" },
+  "metadata": {
+    "description": "Options mode: choice-prompt enforcement hooks for Claude Code and repo-local Codex sessions"
+  },
+  "plugins": [
+    {
+      "name": "options-mode",
+      "source": ".",
+      "description": "Options mode: choice-prompt enforcement hooks for Claude Code and repo-local Codex sessions",
+      "version": "0.9.0"
+    }
+  ]
+}

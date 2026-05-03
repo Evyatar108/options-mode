@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Help me choose."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I need your choice."},{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[]}}]},"uuid":"assistant-real-askuserquestion"}
