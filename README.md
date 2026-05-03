@@ -1,8 +1,8 @@
 # Options Mode
 
-Options Mode is a hook-only Claude Code plugin that keeps user-facing turns in choice-prompt mode. It injects the rules at session start, handles `/options-mode on|off|status`, and uses a deterministic Stop hook: assistant prose must either use the `AskUserQuestion` tool with concrete choices or include the literal `<options-mode>no-question</options-mode>` tag.
+Options Mode is a hook-only plugin that keeps user-facing turns in choice-prompt mode across Claude Code, repo-local Codex sessions, and **GitHub Copilot CLI** (v0.10.0+). It injects the rules at session start and uses a deterministic post-turn check: assistant prose must either call the choice-prompt tool (`AskUserQuestion` on Claude Code, `ask_user` on Copilot CLI) or include the literal `<options-mode>no-question</options-mode>` tag.
 
-## Install
+## Install — Claude Code
 
 Register the marketplace once:
 
@@ -16,13 +16,36 @@ Install the plugin:
 /plugin install options-mode@options-mode --scope user
 ```
 
+Restart Claude Code after installation so SessionStart hooks are loaded.
+
 > Also published as part of [`gim-home/ai-developer-toolkit`](https://github.com/gim-home/ai-developer-toolkit) — install via `/plugin install options-mode@ai-developer-toolkit` if you already use that marketplace.
 
-Restart Claude Code after installation so SessionStart hooks are loaded.
+## Install — GitHub Copilot CLI
+
+Add the personal-mirror marketplace (Copilot CLI 1.0.11+ required for `sessionStart` `additionalContext` injection):
+
+```text
+copilot plugin marketplace add Evyatar108/options-mode
+copilot plugin install options-mode@options-mode
+```
+
+Then turn the mode on for the next session:
+
+```text
+/options-mode on
+```
+
+Or write the flag directly:
+
+```text
+mkdir -p ~/.copilot && echo on > ~/.copilot/.options-mode-active
+```
+
+The flag is machine-wide (no per-session toggle in v1). Mode anchors at the next session start when the SessionStart hook injects the rules text via `additionalContext`. The `agentStop` hook (Copilot CLI 1.0.22+) performs best-effort enforcement; its stdin schema is undocumented as of 2026-05-03 — see `~/.copilot/options-mode.log` for the observed payload shape and tune `hooks/copilot-agent-stop.js` if needed.
 
 ## Requirements
 
-Options Mode has no external runtime dependency. The Claude Code surfaces run as local hooks, and Stop-hook enforcement does not call another CLI or model.
+Options Mode has no external runtime dependency. The Claude Code and Copilot CLI surfaces run as local Node hooks, and post-turn enforcement does not call another CLI or model.
 
 ## Tag Protocol
 
@@ -46,7 +69,9 @@ I updated the README and started the harness.
 <options-mode>no-question</options-mode>
 ```
 
-Claude Code enforces this in the Stop hook when options mode is on. Codex support is advisory only: the repo-level SessionStart hook injects the same rules text when running Codex from this checkout, but Codex does not get Stop-hook enforcement or `/options-mode` command handling from this plugin.
+Claude Code enforces this in the Stop hook when options mode is on. Copilot CLI enforces this in the `agentStop` hook (best-effort, schema-discovery). Codex support is advisory only: the repo-level SessionStart hook injects the same rules text when running Codex from this checkout, but Codex does not get Stop-hook enforcement or `/options-mode` command handling from this plugin.
+
+On Copilot CLI the choice-prompt tool is `ask_user` instead of `AskUserQuestion`. The rules text instructs the model to pass `{question, choices, allow_freeform: false}` and prefix the strongest choice with `Recommended: `.
 
 ## OS Support
 
@@ -54,6 +79,7 @@ Claude Code enforces this in the Stop hook when options mode is on. Codex suppor
 | --- | --- |
 | Claude Code plugin hooks | Windows, macOS, Linux |
 | Claude Code statusline | Bash on macOS/Linux/WSL/Git Bash; PowerShell on Windows |
+| Copilot CLI hooks (`sessionStart` 1.0.11+, `agentStop` 1.0.22+) | Windows, macOS, Linux (Node 18+) |
 | Codex repo-level SessionStart | macOS/Linux in v1 per caveman precedent |
 
 ## Commands

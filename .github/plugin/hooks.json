@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "node hooks/copilot-session-start.js",
+        "powershell": "node hooks/copilot-session-start.js",
+        "timeoutSec": 5,
+        "comment": "Inject options-mode rules text into the session via additionalContext when the flag is on (Copilot CLI 1.0.11+)."
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "node hooks/copilot-agent-stop.js",
+        "powershell": "node hooks/copilot-agent-stop.js",
+        "timeoutSec": 30,
+        "comment": "Best-effort enforcement: deny the stop if the last assistant turn lacks both an ask_user tool call and the <options-mode>no-question</options-mode> tag. Schema undocumented as of 2026-05-03 — see ~/.copilot/options-mode.log for the observed stdin shape and tune the heuristic in copilot-agent-stop.js."
+      }
+    ]
+  }
+}

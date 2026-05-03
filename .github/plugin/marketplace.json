@@ -2,14 +2,14 @@
   "name": "options-mode",
   "owner": { "name": "Evyatar Mitrani" },
   "metadata": {
-    "description": "Options mode: choice-prompt enforcement hooks for Claude Code and repo-local Codex sessions"
+    "description": "Options mode: choice-prompt enforcement hooks for Claude Code, repo-local Codex sessions, and GitHub Copilot CLI"
   },
   "plugins": [
     {
       "name": "options-mode",
       "source": ".",
-      "description": "Options mode: choice-prompt enforcement hooks for Claude Code and repo-local Codex sessions",
-      "version": "0.9.0"
+      "description": "Options mode: choice-prompt enforcement hooks for Claude Code, repo-local Codex sessions, and GitHub Copilot CLI",
+      "version": "0.10.0"
     }
   ]
 }
