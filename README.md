@@ -1,7 +1,7 @@
 # Options Mode
 
 <p align="center">
-  <img src="logo.png" alt="Options Mode logo" width="280" />
+  <img src="assets/logo.png" alt="Options Mode logo" width="280" />
 </p>
 
 You give an agent a task. It works for a while, then comes back with a paragraph of preamble and a question buried at the end. You scroll, read, type a reply, hope it's clear enough — and the agent goes off again. Now multiply that by five agents you're babysitting in parallel. Or by the fact that you're driving from your phone on the train. The slow part isn't the model — it's you reading prose and typing replies.
@@ -12,11 +12,11 @@ I built **options-mode**, a plugin for Claude Code and GitHub Copilot CLI that f
 
 > **Normal:** Paragraphs of context. A question buried at the end. You scroll, read, type a reply, hope it's clear enough.
 
-![Normal response — wall of prose with the question buried at the end](before.png)
+![Normal response — wall of prose with the question buried at the end](assets/before.png)
 
 > **Options Mode:** Two to four labels on screen. Recommended one tagged. Arrow keys, Enter, done. Next turn fires.
 
-![Options Mode response — arrow-key picker with concrete labeled choices and one marked Recommended](after.png)
+![Options Mode response — arrow-key picker with concrete labeled choices and one marked Recommended](assets/after.png)
 
 Same decision. Seconds instead of a minute. Works the same in a terminal, on an iPad, or while triaging six agent windows.
 
@@ -43,26 +43,9 @@ Install the plugin:
 
 Restart your CLI after installation so SessionStart hooks are loaded. Works on Claude Code and GitHub Copilot CLI.
 
-## Requirements
-
-Options Mode has no external runtime dependency. The Claude Code and Copilot CLI surfaces run as local Node hooks, and post-turn enforcement does not call another CLI or model.
-
 ## Commands
 
 - `/options-mode on` — enable choice-prompt enforcement for this session.
 - `/options-mode off` — disable enforcement for this session.
 - `/options-mode status` — show the current effective mode.
 - `/options-mode default on|off|clear|status` — manage the global default that applies to new sessions.
-
-### Global Default
-
-`/options-mode default` lets users pick a permanent default for every new session without per-session opt-in. The default is stored in `<configRoot>/options.json` (typically `~/.claude/options.json`) under the `defaultMode` key. Per-session flags continue to override the default — e.g. with `defaultMode: "on"`, running `/options-mode off` in a single session keeps that session off without changing the file.
-
-Precedence for the effective default is **env → file → off**: `OPTIONS_DEFAULT_MODE=on|off` in the environment is the escape hatch and overrides anything written by `/options-mode default`. With both set, the displayed default in `/options-mode status` reflects the resolved precedence (env wins).
-
-## v1 Limitations
-
-- Claude Code has full SessionStart, UserPromptSubmit, Stop, and statusline support.
-- Codex ships SessionStart rule injection only; no Codex Stop hook or `/options-mode` command enforcement in v1.
-- Standalone install/uninstall shell scripts are not shipped.
-- Home-local Codex hook installation is deferred to v2.

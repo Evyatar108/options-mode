@@ -1,6 +1,28 @@
 # Options Mode Plugin
 
-Options Mode is a hook-only plugin. Runtime code is CommonJS under `hooks/`; tests live in `tests/run.sh` and must stay offline/deterministic by using isolated `CLAUDE_CONFIG_DIR` and `HOME` roots.
+Options Mode is a hook-only plugin. Runtime code is CommonJS under `hooks/`; tests live in `tests/run.sh` and must stay offline/deterministic by using isolated `CLAUDE_CONFIG_DIR`, `COPILOT_CONFIG_DIR`, and `HOME` roots.
+
+## v0.10.0 Migration Note
+
+Options Mode v0.10.0 adds a **GitHub Copilot CLI** surface alongside the existing Claude Code plugin and repo-local Codex SessionStart support.
+
+New files (Copilot-only, do not affect Claude Code):
+
+- `hooks/copilot-config.js` — `OPTIONS_RULES_FOR_COPILOT` rules text (mentions `ask_user` / `choices` / `allow_freeform: false` instead of `AskUserQuestion`), Copilot flag at `<copilotConfigRoot>/.options-mode-active` (default `~/.copilot/.options-mode-active`, override via `COPILOT_CONFIG_DIR`), audit log at `<copilotConfigRoot>/options-mode.log`. Mirrors the safety pattern in `hooks/config.js` (lstat symlink check + `O_EXCL | O_NOFOLLOW` temp + atomic rename) with the same TOCTOU acceptance.
+- `hooks/copilot-session-start.js` — emits `{additionalContext: OPTIONS_RULES_FOR_COPILOT}` when the flag is `on`, `{}` otherwise. Requires Copilot CLI 1.0.11+ for `additionalContext` to be honored (public docs reference page is stale; see changelog at github.com/github/copilot-cli/blob/main/changelog.md). The flag is machine-wide in v1 — there is no `session_id` in Copilot CLI hook stdin we can use to derive a per-session flag, so per-session toggling is deferred.
+- `hooks/copilot-agent-stop.js` — best-effort post-turn enforcement. Walks every string value in the stdin payload; if neither the `<options-mode>no-question</options-mode>` tag nor an `ask_user` invocation hint is present, emits a deny payload. **The agentStop stdin schema is undocumented** as of 2026-05-03 (Copilot CLI 1.0.22+); the hook logs full stdin to `<copilotConfigRoot>/options-mode.log` for empirical schema discovery, and emits the deny decision with multiple field-name shapes (`decision/block`/`reason`, `permissionDecision/permissionDecisionReason`, `block/blockReason`) so whichever shape Copilot honors will fire. Tune the heuristic in `copilot-agent-stop.js` after observing real payloads.
+- `hooks/copilot-toggle.js` — on|off|status helper. CLI-callable directly; the skill body invokes the equivalent shell commands instead so it works without resolving the plugin install path.
+- `.copilot-plugin/skills/options-mode/SKILL.md` — slash command. The body is a prompt template; Copilot CLI invokes it when the user types `/options-mode`. Body instructs the model to write the flag via `mkdir -p ~/.copilot && printf '<arg>\n' > ~/.copilot/.options-mode-active`. Lives under `.copilot-plugin/` (mirroring the `.codex-plugin/` precedent) so Claude Code's `<plugin-root>/skills/` scan still finds nothing — the test_codex_plugin_skills_field invariant continues to hold.
+- `.github/plugin/plugin.json` — Copilot CLI plugin manifest. Set as a separate file from `.claude-plugin/plugin.json` because the schemas differ (Copilot has `agents`/`skills`/`hooks` path fields; Claude Code has its own manifest contract). Copilot CLI's manifest lookup hits `.github/plugin/plugin.json` before `.claude-plugin/plugin.json`, so the Copilot-shaped manifest wins for Copilot consumers and the Claude Code manifest stays untouched.
+- `.github/plugin/hooks.json` — Copilot hooks config. Wires `sessionStart` and `agentStop` events to `node hooks/copilot-*.js`. Hook commands assume cwd defaults to plugin install root (`~/.copilot/installed-plugins/<MARKETPLACE>/<PLUGIN-NAME>/`).
+
+What v0.10.0 does NOT change:
+
+- Claude Code SessionStart, UserPromptSubmit, Stop, statusline behavior — all unchanged. The `OPTIONS_RULES_TEXT` constant in `hooks/config.js` still mentions `AskUserQuestion`; the new Copilot rules text in `hooks/copilot-config.js::OPTIONS_RULES_FOR_COPILOT` mentions `ask_user`. The two rule strings are independent and may diverge as each surface evolves.
+- Codex repo-local SessionStart at `.codex/hooks.json` — unchanged.
+- Existing tests in `tests/run.sh` — pre-existing assertions still pass; new Copilot smoke tests are not yet in `run.sh` and rely on the empirical `~/.copilot/options-mode.log` logged by `copilot-agent-stop.js` for iteration.
+
+Bumps `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, and the new `.github/plugin/plugin.json` to `0.10.0` in lockstep. Three marketplace indexes (`.claude-plugin/marketplace.json`, `.github/plugin/marketplace.json`, `.agents/plugins/marketplace.json`) all bumped + descriptions expanded to mention Copilot CLI.
 
 ## v0.9.0 Migration Note
 
@@ -34,7 +56,7 @@ The new failure mode is tagless drift: when the last assistant turn has plain pr
 
 ## Options Rules Anchors
 
-Harness checks use these stable substrings from `hooks/config.js::OPTIONS_RULES_TEXT`: `OPTIONS MODE ACTIVE`, `AskUserQuestion choice prompt`, `Recommended`, `mutually exclusive labels`, and `<options-mode>no-question</options-mode>`. Update the harness if the canonical rules text changes.
+Harness checks use these stable substrings from `hooks/config.js::OPTIONS_RULES_TEXT` (Claude Code surface): `OPTIONS MODE ACTIVE`, `AskUserQuestion choice prompt`, `Recommended`, `mutually exclusive labels`, and `<options-mode>no-question</options-mode>`. The parallel `hooks/copilot-config.js::OPTIONS_RULES_FOR_COPILOT` constant uses Copilot-flavored anchors: `OPTIONS MODE ACTIVE`, `ask_user`, `choices`, `Recommended`, and `<options-mode>no-question</options-mode>`. Update the relevant harness if either canonical rules text changes; the two strings intentionally diverge on the choice-prompt tool name (`AskUserQuestion` vs. `ask_user`) and may diverge further as each surface evolves.
 
 ## Flag Contract
 
@@ -122,7 +144,11 @@ The canonical no-question tag is the literal `<options-mode>no-question</options
 
 Use the tag only for plain prose, NOT a request for user input. Semantically, it asserts "this turn is not a question; do not convert it into an `AskUserQuestion` prompt." When the assistant needs the user to decide, choose, confirm, or answer a question, use an `AskUserQuestion` tool call with concrete choices instead of the tag.
 
-Cross-CLI portability: Claude Code enforces the tag in the Stop hook. Codex CLI receives the same rules through the repo-level SessionStart hook, but that path is advisory only; Codex does not run the Claude Code Stop hook.
+Cross-CLI portability:
+
+- **Claude Code** enforces the tag in the Stop hook (`hooks/stop.js`).
+- **Copilot CLI** enforces the tag in the `agentStop` hook (`hooks/copilot-agent-stop.js`) — best-effort, schema-discovery (see v0.10.0 Migration Note).
+- **Codex CLI** receives the same rules through the repo-level SessionStart hook at `.codex/hooks.json`, but that path is advisory only; Codex does not run a Stop or agentStop hook.
 
 ## Loop Counter
 
