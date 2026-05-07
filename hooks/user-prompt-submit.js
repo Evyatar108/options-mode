@@ -2,8 +2,10 @@
 
 const {
   OPTIONS_RULES_TEXT,
+  OPTIONS_RULES_TEXT_STRICT,
+  VALID_MODES,
   getFlagPath,
-  isOptionsActive,
+  getOptionsMode,
   safeWriteFlag,
   readFlag,
   getDefaultModeRaw,
@@ -34,13 +36,13 @@ readStdin(raw => {
   if (lower.startsWith('/options-mode')) {
     const tokens = lower.split(/\s+/);
     const arg = tokens[1] || 'status';
-    if (arg === 'on' || arg === 'off') {
+    if (VALID_MODES.includes(arg)) {
       safeWriteFlag(getFlagPath(sessionId), arg);
       block(`options mode: ${arg}`);
       return;
     }
     if (arg === 'status') {
-      const effective = isOptionsActive(sessionId) ? 'on' : 'off';
+      const effective = getOptionsMode(sessionId);
       const sessionRaw = readFlag(getFlagPath(sessionId));
       const session = sessionRaw === null ? 'unset' : sessionRaw;
       const defaultRaw = getDefaultModeRaw();
@@ -50,7 +52,7 @@ readStdin(raw => {
     }
     if (arg === 'default') {
       const sub = tokens[2] || 'status';
-      if (sub === 'on' || sub === 'off') {
+      if (VALID_MODES.includes(sub)) {
         setDefaultMode(sub);
         block(`options mode default: ${sub}`);
         return;
@@ -65,18 +67,20 @@ readStdin(raw => {
         block(`options mode default: ${defaultRaw === null ? 'unset' : defaultRaw}`);
         return;
       }
-      block('options mode: usage /options-mode on|off|status|default [on|off|clear|status]');
+      block('options mode: usage /options-mode on|off|strict|status|default [on|off|strict|clear|status]');
       return;
     }
-    block('options mode: usage /options-mode on|off|status|default [on|off|clear|status]');
+    block('options mode: usage /options-mode on|off|strict|status|default [on|off|strict|clear|status]');
     return;
   }
 
-  if (isOptionsActive(sessionId)) {
+  const mode = getOptionsMode(sessionId);
+  if (mode === 'on' || mode === 'strict') {
+    const rules = mode === 'strict' ? OPTIONS_RULES_TEXT_STRICT : OPTIONS_RULES_TEXT;
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: {
         hookEventName: 'UserPromptSubmit',
-        additionalContext: OPTIONS_RULES_TEXT
+        additionalContext: rules
       }
     }));
   }

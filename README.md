@@ -32,20 +32,21 @@ Same decision. Seconds instead of a minute. Works the same in a terminal, on an 
 Register the marketplace once:
 
 ```text
-/plugin marketplace add Evyatar108/options-mode
+/plugin marketplace add gim-home/ai-developer-toolkit
 ```
 
 Install the plugin:
 
 ```text
-/plugin install options-mode@options-mode --scope user
+/plugin install options-mode@ai-developer-toolkit --scope user
 ```
 
 Restart your CLI after installation so SessionStart hooks are loaded. Works on Claude Code and GitHub Copilot CLI.
 
 ## Commands
 
-- `/options-mode on` — enable choice-prompt enforcement for this session.
+- `/options-mode on` — enable choice-prompt enforcement for this session. Plain prose is allowed when the model marks the turn as not-a-question.
+- `/options-mode strict` — like `on`, but **every** response back to the user must come with concrete options. The plain-prose escape is removed. Useful when next-step suggestions are usually obvious — the model surfaces them as choices and you continue with one keystroke instead of typing.
 - `/options-mode off` — disable enforcement for this session.
 - `/options-mode status` — show the current effective mode.
-- `/options-mode default on|off|clear|status` — manage the global default that applies to new sessions.
+- `/options-mode default on|off|strict|clear|status` — manage the global default that applies to new sessions.

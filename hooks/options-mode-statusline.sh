@@ -1,8 +1,8 @@
 #!/bin/bash
 # options-mode statusline badge for Claude Code.
-# Mirrors hooks/config.js::isOptionsActive() — per-session flag wins; on missing
-# flag, defer to global default (env -> file -> off). Renders [OPTIONS MODE] only
-# when effective mode is on; silent otherwise.
+# Mirrors hooks/config.js::getOptionsMode() — per-session flag wins; on missing
+# flag, defer to global default (env -> file -> off). Renders [OPTIONS MODE] for
+# on, [OPTIONS MODE: strict] for strict (v0.15.0+), silent otherwise.
 
 set -u
 
@@ -17,7 +17,7 @@ read_flag_file() {
   mode=$(head -c 64 "$path" 2>/dev/null | tr -d '\n\r' | tr '[:upper:]' '[:lower:]')
   mode=$(printf '%s' "$mode" | tr -cd 'a-z0-9-')
   case "$mode" in
-    on|off) printf '%s' "$mode"; return 0 ;;
+    on|off|strict) printf '%s' "$mode"; return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -62,11 +62,11 @@ extract_session_id() {
 }
 
 get_default_mode() {
-  # env -> file -> none. Returns "on", "off", or empty.
+  # env -> file -> none. Returns "on", "off", "strict", or empty.
   local env_mode
   env_mode=$(printf '%s' "${OPTIONS_DEFAULT_MODE:-}" | tr '[:upper:]' '[:lower:]')
   case "$env_mode" in
-    on|off) printf '%s' "$env_mode"; return 0 ;;
+    on|off|strict) printf '%s' "$env_mode"; return 0 ;;
   esac
   local cfg="$CLAUDE_DIR/options.json"
   [ -L "$cfg" ] && return 1
@@ -74,11 +74,12 @@ get_default_mode() {
   local raw
   raw=$(head -c 4096 "$cfg" 2>/dev/null) || return 1
   local match
-  match=$(printf '%s' "$raw" | grep -Eo '"defaultMode"[[:space:]]*:[[:space:]]*"(on|off)"' | head -n 1)
+  match=$(printf '%s' "$raw" | grep -Eo '"defaultMode"[[:space:]]*:[[:space:]]*"(on|off|strict)"' | head -n 1)
   [ -z "$match" ] && return 1
   case "$match" in
     *'"on"') printf 'on'; return 0 ;;
     *'"off"') printf 'off'; return 0 ;;
+    *'"strict"') printf 'strict'; return 0 ;;
   esac
   return 1
 }
@@ -109,6 +110,9 @@ if [ -z "$MODE" ]; then
 fi
 
 [ -z "$MODE" ] && exit 0
-[ "$MODE" != "on" ] && exit 0
 
-printf '\033[38;5;172m[OPTIONS MODE]\033[0m'
+case "$MODE" in
+  on) printf '\033[38;5;172m[OPTIONS MODE]\033[0m' ;;
+  strict) printf '\033[38;5;172m[OPTIONS MODE: strict]\033[0m' ;;
+  *) exit 0 ;;
+esac

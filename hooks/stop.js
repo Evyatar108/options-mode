@@ -4,9 +4,18 @@ const fs = require('fs');
 const crypto = require('crypto');
 const path = require('path');
 
-const { appendLog, getConfigRoot, isOptionsActive, OPTIONS_NO_QUESTION_TAG } = require('./config');
+const {
+  appendLog,
+  getConfigRoot,
+  isOptionsActive,
+  getOptionsMode,
+  OPTIONS_NO_QUESTION_TAG,
+  OPTIONS_BACKGROUND_TASK_TAG,
+  OPTIONS_BACKGROUND_AGENT_TAG
+} = require('./config');
 
 const BLOCK_REASON = `Add ${OPTIONS_NO_QUESTION_TAG} tag if this turn is not asking the user, or use AskUserQuestion with concrete choices.`;
+const BLOCK_REASON_STRICT = `Strict options mode: use AskUserQuestion with concrete choices, or append ${OPTIONS_BACKGROUND_TASK_TAG} or ${OPTIONS_BACKGROUND_AGENT_TAG} when polling.`;
 
 function readStdin() {
   try {
@@ -123,7 +132,14 @@ async function main() {
   const normalized = normalizeAssistantContent(lastAssistant);
   if (normalized.hasAskUserQuestion) return;
   if (!normalized.text || !normalized.text.trim()) return;
-  if (normalized.text.includes(OPTIONS_NO_QUESTION_TAG)) return;
+
+  let mode = 'on';
+  try { mode = getOptionsMode(input.session_id); } catch (e) {}
+  const reason = mode === 'strict' ? BLOCK_REASON_STRICT : BLOCK_REASON;
+
+  if (normalized.text.includes(OPTIONS_BACKGROUND_TASK_TAG)) return;
+  if (normalized.text.includes(OPTIONS_BACKGROUND_AGENT_TAG)) return;
+  if (mode !== 'strict' && normalized.text.includes(OPTIONS_NO_QUESTION_TAG)) return;
 
   const key = assistantKey(lastAssistant, normalized.text);
   const count = incrementLoopCounter(input.transcript_path, key);
@@ -133,10 +149,10 @@ async function main() {
     return;
   }
 
-  appendLog(`INFO options Stop hook blocked missing continue tag: ${BLOCK_REASON}`);
+  appendLog(`INFO options Stop hook blocked missing continue tag: ${reason}`);
   process.stdout.write(JSON.stringify({
     decision: 'block',
-    reason: sanitizeReason(BLOCK_REASON)
+    reason: sanitizeReason(reason)
   }));
 }
 
@@ -148,6 +164,7 @@ if (require.main === module) {
 
 module.exports = {
   BLOCK_REASON,
+  BLOCK_REASON_STRICT,
   parseTranscript,
   normalizeAssistantContent,
   sanitizeReason

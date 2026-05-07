@@ -32,6 +32,25 @@ NODE
   pass test_codex_plugin_interface_fields
 }
 
+test_copilot_skills_dir_renamed() {
+  node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const root = process.cwd();
+const pluginRoot = path.join(root, 'plugins/options-mode');
+// v0.12.0 rename: .copilot-plugin/skills/ -> .copilot-plugin/copilot-skills/
+// to prevent Claude Code's plugin discovery from picking up the Copilot skill body
+// (which writes to ~/.copilot/.options-mode-active, the wrong path for Claude Code).
+const oldDir = path.join(pluginRoot, '.copilot-plugin/skills');
+if (fs.existsSync(oldDir)) throw new Error(`legacy .copilot-plugin/skills/ must not exist (would re-expose skill to Claude Code); got ${oldDir}`);
+const newSkillFile = path.join(pluginRoot, '.copilot-plugin/copilot-skills/options-mode/SKILL.md');
+if (!fs.existsSync(newSkillFile)) throw new Error(`copilot skill SKILL.md missing at ${newSkillFile}`);
+const copilotManifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, '.github/plugin/plugin.json'), 'utf8'));
+if (copilotManifest.skills !== '.copilot-plugin/copilot-skills/') throw new Error(`bad copilot manifest skills field: ${copilotManifest.skills}`);
+NODE
+  pass test_copilot_skills_dir_renamed
+}
+
 test_codex_plugin_skills_field() {
   node <<'NODE'
 const fs = require('fs');
@@ -272,7 +291,7 @@ test_user_prompt_submit_commands() {
   before="$(cat "$dir/.options-active")"
   out="$(run_user_prompt_submit "$dir" '/options-mode foo')"
   after="$(cat "$dir/.options-active")"
-  assert_block_reason test_user_prompt_submit_foo "$out" 'options mode: usage /options-mode on|off|status|default [on|off|clear|status]'
+  assert_block_reason test_user_prompt_submit_foo "$out" 'options mode: usage /options-mode on|off|strict|status|default [on|off|strict|clear|status]'
   [[ "$before" == "$after" ]] || fail test_user_prompt_submit_commands "foo mutated flag"
 }
 
@@ -298,14 +317,16 @@ NODE
 test_config_exports() {
   node <<'NODE'
 const config = require('./plugins/options-mode/hooks/config');
-for (const key of ['OPTIONS_NO_QUESTION_TAG', 'OPTIONS_RULES_TEXT', 'escapeForBashSingleQuote', 'getFlagPath', 'getConfigRoot', 'getConfigPath', 'getDefaultMode', 'getDefaultModeRaw', 'setDefaultMode', 'clearDefaultMode', 'isOptionsActive', 'hasValidFlag']) {
+for (const key of ['OPTIONS_NO_QUESTION_TAG', 'OPTIONS_BACKGROUND_TASK_TAG', 'OPTIONS_BACKGROUND_AGENT_TAG', 'OPTIONS_RULES_TEXT', 'OPTIONS_RULES_TEXT_STRICT', 'escapeForBashSingleQuote', 'getFlagPath', 'getConfigRoot', 'getConfigPath', 'getDefaultMode', 'getDefaultModeRaw', 'setDefaultMode', 'clearDefaultMode', 'isOptionsActive', 'getOptionsMode', 'hasValidFlag']) {
   if (!(key in config)) throw new Error(`missing export ${key}`);
 }
 for (const key of ['spawn' + 'CodexSync', 'resolve' + 'CodexCommand']) {
   if (key in config) throw new Error(`deleted export still present ${key}`);
 }
 if (config.OPTIONS_NO_QUESTION_TAG !== '<options-mode>no-question</options-mode>') throw new Error('bad no-question tag');
-if (config.VALID_MODES.join(',') !== 'on,off') throw new Error('bad modes');
+if (config.OPTIONS_BACKGROUND_TASK_TAG !== '<options-mode>background-task</options-mode>') throw new Error('bad background-task tag');
+if (config.OPTIONS_BACKGROUND_AGENT_TAG !== '<options-mode>background-agent</options-mode>') throw new Error('bad background-agent tag');
+if (config.VALID_MODES.join(',') !== 'on,off,strict') throw new Error('bad modes: ' + config.VALID_MODES.join(','));
 NODE
   pass test_config_exports
 }
@@ -900,9 +921,340 @@ test_bad_default_subarg() {
   local dir out
   dir="$(mktemp -d)"
   out="$(run_user_prompt_submit "$dir" '/options-mode default bogus')"
-  assert_block_reason test_bad_default_subarg_block "$out" 'options mode: usage /options-mode on|off|status|default [on|off|clear|status]'
+  assert_block_reason test_bad_default_subarg_block "$out" 'options mode: usage /options-mode on|off|strict|status|default [on|off|strict|clear|status]'
   [[ ! -e "$dir/options.json" ]] || fail test_bad_default_subarg "bogus subarg created options.json"
   pass test_bad_default_subarg
+}
+
+write_strict_transcript() {
+  # writes a Claude Code assistant transcript with the given inline text to $1
+  local out="$1" text="$2"
+  TRANSCRIPT="$out" TEXT="$text" "$NODE_BIN" <<'NODE'
+const fs = require('fs');
+const envelope = {
+  type: 'assistant',
+  message: { role: 'assistant', content: [{ type: 'text', text: process.env.TEXT }] },
+  uuid: `assistant-strict-${Buffer.from(process.env.TEXT).toString('base64').slice(0, 16)}`
+};
+fs.writeFileSync(process.env.TRANSCRIPT, JSON.stringify(envelope) + '\n');
+NODE
+}
+
+write_copilot_transcript() {
+  # writes a Copilot events.jsonl with one assistant.message carrying the given content to $1
+  local out="$1" content="$2"
+  TRANSCRIPT="$out" CONTENT="$content" "$NODE_BIN" <<'NODE'
+const fs = require('fs');
+const evt = {
+  type: 'assistant.message',
+  id: `copilot-strict-${Buffer.from(process.env.CONTENT).toString('base64').slice(0, 16)}`,
+  data: { content: process.env.CONTENT, toolRequests: [] }
+};
+fs.writeFileSync(process.env.TRANSCRIPT, JSON.stringify(evt) + '\n');
+NODE
+}
+
+run_copilot_agent_stop() {
+  local copilot_root="$1" transcript="$2"
+  if command -v cygpath >/dev/null 2>&1; then transcript="$(cygpath -m "$transcript")"; fi
+  COPILOT_CONFIG_DIR="$copilot_root" HOME="$copilot_root/home" \
+    "$NODE_BIN" "$PLUGIN_ROOT/hooks/copilot-agent-stop.js" <<JSON
+{"timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp","sessionId":"sess-copilot-strict","transcriptPath":"$transcript","stopReason":"end_turn"}
+JSON
+}
+
+test_get_options_mode_returns_strict() {
+  local dir sid="sess-strict-mode"
+  local flag_name
+  flag_name="$(session_flag_name "$sid")"
+  dir="$(mktemp -d)"
+  printf strict > "$dir/$flag_name"
+  CLAUDE_CONFIG_DIR="$dir" SID="$sid" node <<'NODE'
+const { getOptionsMode, isOptionsActive } = require('./plugins/options-mode/hooks/config');
+if (getOptionsMode(process.env.SID) !== 'strict') throw new Error(`expected strict, got ${getOptionsMode(process.env.SID)}`);
+if (isOptionsActive(process.env.SID) !== true) throw new Error('isOptionsActive should be true for strict');
+NODE
+  pass test_get_options_mode_returns_strict
+}
+
+test_get_options_mode_env_override() {
+  local dir
+  dir="$(mktemp -d)"
+  CLAUDE_CONFIG_DIR="$dir" OPTIONS_DEFAULT_MODE=strict node <<'NODE'
+const { getOptionsMode } = require('./plugins/options-mode/hooks/config');
+if (getOptionsMode() !== 'strict') throw new Error(`expected strict, got ${getOptionsMode()}`);
+NODE
+  pass test_get_options_mode_env_override
+}
+
+assert_stop_block_strict() {
+  local name="$1" out="$2"
+  OUT="$out" node <<'NODE'
+const { BLOCK_REASON_STRICT } = require('./plugins/options-mode/hooks/stop');
+const out = JSON.parse(process.env.OUT);
+if (out.decision !== 'block') throw new Error(`decision was ${out.decision}`);
+if (out.reason !== BLOCK_REASON_STRICT) throw new Error(`reason was ${out.reason}`);
+if (out.reason.length > 200) throw new Error(`reason length ${out.reason.length}`);
+NODE
+  pass "$name"
+}
+
+test_strict_no_question_tag_blocks() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf strict > "$dir/.options-active"
+  transcript="$(mktemp)"
+  write_strict_transcript "$transcript" $'Done with the work.\n<options-mode>no-question</options-mode>'
+  out="$(run_stop_json "$dir" "$transcript")"
+  assert_stop_block_strict test_strict_no_question_tag_blocks "$out"
+}
+
+test_strict_background_task_tag_passes() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf strict > "$dir/.options-active"
+  transcript="$(mktemp)"
+  write_strict_transcript "$transcript" $'Build still running.\n<options-mode>background-task</options-mode>'
+  out="$(run_stop_json "$dir" "$transcript")"
+  assert_empty_output test_strict_background_task_tag_passes "$out"
+}
+
+test_strict_background_agent_tag_passes() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf strict > "$dir/.options-active"
+  transcript="$(mktemp)"
+  write_strict_transcript "$transcript" $'Agent still working.\n<options-mode>background-agent</options-mode>'
+  out="$(run_stop_json "$dir" "$transcript")"
+  assert_empty_output test_strict_background_agent_tag_passes "$out"
+}
+
+test_strict_AskUserQuestion_passes() {
+  local dir out
+  dir="$(mktemp -d)"
+  printf strict > "$dir/.options-active"
+  out="$(run_stop_json "$dir" "$PLUGIN_ROOT/tests/fixtures/transcripts/last-msg-real-askuserquestion.jsonl")"
+  assert_empty_output test_strict_AskUserQuestion_passes "$out"
+}
+
+test_strict_block_reason_mentions_bg_tags() {
+  node <<'NODE'
+const { BLOCK_REASON_STRICT } = require('./plugins/options-mode/hooks/stop');
+if (BLOCK_REASON_STRICT.indexOf('<options-mode>background-task</options-mode>') === -1) {
+  throw new Error('strict block reason missing background-task tag');
+}
+if (BLOCK_REASON_STRICT.indexOf('<options-mode>background-agent</options-mode>') === -1) {
+  throw new Error('strict block reason missing background-agent tag');
+}
+if (BLOCK_REASON_STRICT.indexOf('AskUserQuestion') === -1) {
+  throw new Error('strict block reason missing AskUserQuestion');
+}
+NODE
+  pass test_strict_block_reason_mentions_bg_tags
+}
+
+test_on_mode_no_question_tag_still_passes() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf on > "$dir/.options-active"
+  transcript="$(mktemp)"
+  write_strict_transcript "$transcript" $'Done.\n<options-mode>no-question</options-mode>'
+  out="$(run_stop_json "$dir" "$transcript")"
+  assert_empty_output test_on_mode_no_question_tag_still_passes "$out"
+}
+
+test_on_mode_background_task_tag_passes() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf on > "$dir/.options-active"
+  transcript="$(mktemp)"
+  write_strict_transcript "$transcript" $'Build polling.\n<options-mode>background-task</options-mode>'
+  out="$(run_stop_json "$dir" "$transcript")"
+  assert_empty_output test_on_mode_background_task_tag_passes "$out"
+}
+
+test_on_mode_background_agent_tag_passes() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf on > "$dir/.options-active"
+  transcript="$(mktemp)"
+  write_strict_transcript "$transcript" $'Agent polling.\n<options-mode>background-agent</options-mode>'
+  out="$(run_stop_json "$dir" "$transcript")"
+  assert_empty_output test_on_mode_background_agent_tag_passes "$out"
+}
+
+test_copilot_strict_blocks_no_question_tag() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf strict > "$dir/.options-mode-active"
+  transcript="$(mktemp)"
+  write_copilot_transcript "$transcript" $'Done with work.\n[//]: # (options-mode-no-question)'
+  out="$(run_copilot_agent_stop "$dir" "$transcript")"
+  OUT="$out" node <<'NODE'
+const out = JSON.parse(process.env.OUT);
+if (out.decision !== 'block') throw new Error(`decision was ${out.decision}`);
+if (out.reason.indexOf('background-task') === -1) throw new Error('strict copilot reason missing background-task');
+if (out.reason.indexOf('background-agent') === -1) throw new Error('strict copilot reason missing background-agent');
+NODE
+  pass test_copilot_strict_blocks_no_question_tag
+}
+
+test_copilot_strict_passes_background_task() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf strict > "$dir/.options-mode-active"
+  transcript="$(mktemp)"
+  write_copilot_transcript "$transcript" $'Build polling.\n[//]: # (options-mode-background-task)'
+  out="$(run_copilot_agent_stop "$dir" "$transcript")"
+  [[ "$out" == '{}' ]] || fail test_copilot_strict_passes_background_task "expected pass {}, got: $out"
+  pass test_copilot_strict_passes_background_task
+}
+
+test_copilot_strict_passes_background_agent() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf strict > "$dir/.options-mode-active"
+  transcript="$(mktemp)"
+  write_copilot_transcript "$transcript" $'Agent polling.\n[//]: # (options-mode-background-agent)'
+  out="$(run_copilot_agent_stop "$dir" "$transcript")"
+  [[ "$out" == '{}' ]] || fail test_copilot_strict_passes_background_agent "expected pass {}, got: $out"
+  pass test_copilot_strict_passes_background_agent
+}
+
+test_copilot_on_no_question_tag_regression() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf on > "$dir/.options-mode-active"
+  transcript="$(mktemp)"
+  write_copilot_transcript "$transcript" $'Done.\n[//]: # (options-mode-no-question)'
+  out="$(run_copilot_agent_stop "$dir" "$transcript")"
+  [[ "$out" == '{}' ]] || fail test_copilot_on_no_question_tag_regression "on-mode regression: expected {}, got: $out"
+  pass test_copilot_on_no_question_tag_regression
+}
+
+test_copilot_on_background_task_tag_passes() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf on > "$dir/.options-mode-active"
+  transcript="$(mktemp)"
+  write_copilot_transcript "$transcript" $'Build polling.\n[//]: # (options-mode-background-task)'
+  out="$(run_copilot_agent_stop "$dir" "$transcript")"
+  [[ "$out" == '{}' ]] || fail test_copilot_on_background_task_tag_passes "expected pass {}, got: $out"
+  pass test_copilot_on_background_task_tag_passes
+}
+
+test_codex_hooks_no_strict_leak() {
+  node <<'NODE'
+const fs = require('fs');
+const hooks = JSON.parse(fs.readFileSync('.codex/hooks.json', 'utf8'));
+const entry = hooks.hooks.SessionStart.flatMap((item) => item.hooks || []).find((hook) => hook._owner === 'options-mode');
+if (!entry) throw new Error('options-mode hook entry missing');
+if (entry.command.indexOf('background-task') !== -1) throw new Error('strict bg-task tag leaked into .codex/hooks.json');
+if (entry.command.indexOf('background-agent') !== -1) throw new Error('strict bg-agent tag leaked into .codex/hooks.json');
+if (entry.command.indexOf('OPTIONS MODE ACTIVE (strict)') !== -1) throw new Error('strict header leaked into .codex/hooks.json');
+NODE
+  pass test_codex_hooks_no_strict_leak
+}
+
+test_user_prompt_submit_strict_writes_flag() {
+  local dir out
+  dir="$(mktemp -d)"
+  out="$(run_user_prompt_submit "$dir" '/options-mode strict')"
+  assert_block_reason test_user_prompt_submit_strict_writes_flag_block "$out" 'options mode: strict'
+  [[ "$(cat "$dir/.options-active")" == "strict" ]] || fail test_user_prompt_submit_strict_writes_flag "strict did not write flag"
+  pass test_user_prompt_submit_strict_writes_flag
+}
+
+test_default_set_strict_writes_options_json() {
+  local dir out
+  dir="$(mktemp -d)"
+  out="$(run_user_prompt_submit "$dir" '/options-mode default strict')"
+  assert_block_reason test_default_set_strict_writes_options_json_block "$out" 'options mode default: strict'
+  local content
+  content="$(read_options_json "$dir")"
+  [[ "$content" == '{"defaultMode":"strict"}' ]] || fail test_default_set_strict_writes_options_json "options.json wrong: $content"
+  pass test_default_set_strict_writes_options_json
+}
+
+test_user_prompt_submit_status_strict() {
+  local dir out
+  dir="$(mktemp -d)"
+  run_user_prompt_submit "$dir" '/options-mode strict' >/dev/null
+  out="$(run_user_prompt_submit "$dir" '/options-mode status')"
+  assert_block_reason test_user_prompt_submit_status_strict "$out" 'options mode: strict (session=strict, default=unset)'
+}
+
+test_user_prompt_submit_usage_includes_strict() {
+  local dir out
+  dir="$(mktemp -d)"
+  out="$(run_user_prompt_submit "$dir" '/options-mode bogus')"
+  assert_block_reason test_user_prompt_submit_usage_includes_strict "$out" 'options mode: usage /options-mode on|off|strict|status|default [on|off|strict|clear|status]'
+}
+
+test_statusline_bash_strict() {
+  local dir out sid="sess-statusline-strict-bash"
+  local flag_name
+  flag_name="$(session_flag_name "$sid")"
+
+  # 1. Per-session flag = strict -> [OPTIONS MODE: strict]
+  dir="$(mktemp -d)"
+  printf strict > "$dir/$flag_name"
+  out="$(run_statusline_bash "$dir" "{\"session_id\":\"$sid\"}")"
+  [[ "$out" == *"[OPTIONS MODE: strict]"* ]] || fail test_statusline_bash_strict "per-session strict did not render: '$out'"
+
+  # 2. options.json defaultMode=strict -> [OPTIONS MODE: strict]
+  dir="$(mktemp -d)"
+  printf '%s' '{"defaultMode":"strict"}' > "$dir/options.json"
+  out="$(run_statusline_bash "$dir" "{\"session_id\":\"$sid\"}")"
+  [[ "$out" == *"[OPTIONS MODE: strict]"* ]] || fail test_statusline_bash_strict "default=strict did not render: '$out'"
+
+  # 3. OPTIONS_DEFAULT_MODE=strict env override
+  dir="$(mktemp -d)"
+  out="$(run_statusline_bash "$dir" "{\"session_id\":\"$sid\"}" env OPTIONS_DEFAULT_MODE=strict)"
+  [[ "$out" == *"[OPTIONS MODE: strict]"* ]] || fail test_statusline_bash_strict "env strict did not render: '$out'"
+
+  pass test_statusline_bash_strict
+}
+
+test_statusline_powershell_strict() {
+  local ps_bin dir out sid="sess-statusline-strict-ps"
+  local flag_name
+  ps_bin="$(command -v pwsh || command -v powershell || true)"
+  if [[ -z "$ps_bin" ]]; then
+    pass test_statusline_powershell_strict_skipped
+    return
+  fi
+  flag_name="$(session_flag_name "$sid")"
+
+  dir="$(mktemp -d)"
+  printf strict > "$dir/$flag_name"
+  out="$(run_statusline_pwsh "$ps_bin" "$dir" "{\"session_id\":\"$sid\"}")"
+  [[ "$out" == *"[OPTIONS MODE: strict]"* ]] || fail test_statusline_powershell_strict "per-session strict did not render: '$out'"
+
+  dir="$(mktemp -d)"
+  printf '%s' '{"defaultMode":"strict"}' > "$dir/options.json"
+  out="$(run_statusline_pwsh "$ps_bin" "$dir" "{\"session_id\":\"$sid\"}")"
+  [[ "$out" == *"[OPTIONS MODE: strict]"* ]] || fail test_statusline_powershell_strict "default=strict did not render: '$out'"
+
+  dir="$(mktemp -d)"
+  out="$(run_statusline_pwsh "$ps_bin" "$dir" "{\"session_id\":\"$sid\"}" env OPTIONS_DEFAULT_MODE=strict)"
+  [[ "$out" == *"[OPTIONS MODE: strict]"* ]] || fail test_statusline_powershell_strict "env strict did not render: '$out'"
+
+  pass test_statusline_powershell_strict
+}
+
+test_session_start_strict_emits_strict_rules() {
+  local sid="sess-strict-rules" dir out
+  local flag_name
+  flag_name="$(session_flag_name "$sid")"
+  dir="$(mktemp -d)"
+  printf strict > "$dir/$flag_name"
+  out="$(run_session_start startup "$dir" "$sid")"
+  [[ "$out" == *"<options-mode>background-task</options-mode>"* ]] || fail test_session_start_strict_emits_strict_rules "missing background-task anchor"
+  [[ "$out" == *"<options-mode>background-agent</options-mode>"* ]] || fail test_session_start_strict_emits_strict_rules "missing background-agent anchor"
+  [[ "$out" == *"OPTIONS MODE ACTIVE"* ]] || fail test_session_start_strict_emits_strict_rules "missing active anchor"
+  [[ "$out" == *"strict"* ]] || fail test_session_start_strict_emits_strict_rules "missing strict keyword"
+  pass test_session_start_strict_emits_strict_rules
 }
 
 test_required_fixtures_exist() {
@@ -941,6 +1293,7 @@ test_required_fixtures_exist() {
 
 cd "$ROOT"
 test_codex_plugin_interface_fields
+test_copilot_skills_dir_renamed
 test_codex_plugin_skills_field
 test_escape_for_bash_single_quote
 test_rule_text_sync
@@ -987,3 +1340,26 @@ test_stop_fs_error_fail_open
 test_sanitize_reason_keeps_classifier_prefix_out
 test_loop_counter_bail_at_6
 test_log_rotation
+test_get_options_mode_returns_strict
+test_get_options_mode_env_override
+test_strict_no_question_tag_blocks
+test_strict_background_task_tag_passes
+test_strict_background_agent_tag_passes
+test_strict_AskUserQuestion_passes
+test_strict_block_reason_mentions_bg_tags
+test_on_mode_no_question_tag_still_passes
+test_on_mode_background_task_tag_passes
+test_on_mode_background_agent_tag_passes
+test_copilot_strict_blocks_no_question_tag
+test_copilot_strict_passes_background_task
+test_copilot_strict_passes_background_agent
+test_copilot_on_no_question_tag_regression
+test_copilot_on_background_task_tag_passes
+test_codex_hooks_no_strict_leak
+test_user_prompt_submit_strict_writes_flag
+test_default_set_strict_writes_options_json
+test_user_prompt_submit_status_strict
+test_user_prompt_submit_usage_includes_strict
+test_statusline_bash_strict
+test_statusline_powershell_strict
+test_session_start_strict_emits_strict_rules

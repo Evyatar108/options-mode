@@ -1,2 +1,2 @@
-description = "Control options mode (on/off/status)"
-prompt = "Run /options-mode {{args}}. Valid subcommands: on, off, status. The hook handles this command and blocks it from reaching the model."
+description = "Control options mode (on/off/strict/status)"
+prompt = "Run /options-mode {{args}}. Valid subcommands: on, off, strict, status, default [on|off|strict|clear|status]. The hook handles this command and blocks it from reaching the model."

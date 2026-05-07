@@ -4,8 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const {
   OPTIONS_RULES_TEXT,
+  OPTIONS_RULES_TEXT_STRICT,
   getConfigRoot,
-  isOptionsActive
+  getOptionsMode
 } = require('./config');
 
 function readStdin(callback) {
@@ -45,7 +46,10 @@ readStdin(raw => {
 
   const configRoot = getConfigRoot();
   const sessionId = input.session_id;
-  const rulesBlock = isOptionsActive(sessionId) ? OPTIONS_RULES_TEXT : '';
+  const mode = getOptionsMode(sessionId);
+  let rulesBlock = '';
+  if (mode === 'strict') rulesBlock = OPTIONS_RULES_TEXT_STRICT;
+  else if (mode === 'on') rulesBlock = OPTIONS_RULES_TEXT;
 
   const output = [rulesBlock, statuslineReminder(configRoot)]
     .filter(Boolean)

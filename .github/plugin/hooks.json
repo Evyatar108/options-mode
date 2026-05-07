@@ -16,7 +16,16 @@
         "bash": "node hooks/copilot-agent-stop.js",
         "powershell": "node hooks/copilot-agent-stop.js",
         "timeoutSec": 30,
-        "comment": "Best-effort enforcement: deny the stop if the last assistant turn lacks both an ask_user tool call and the <options-mode>no-question</options-mode> tag. Schema undocumented as of 2026-05-03 — see ~/.copilot/options-mode.log for the observed stdin shape and tune the heuristic in copilot-agent-stop.js."
+        "comment": "Enforcement: read transcriptPath from stdin (events.jsonl), walk backward to the latest assistant.message, and deny the stop unless data.content contains the CommonMark reference-link sentinel `[//]: # (options-mode-no-question)` (hidden by markdown renderers) or data.toolRequests contains an ask_user call. Loop-counter give-up after 5 consecutive blocks matches hooks/stop.js."
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "node hooks/copilot-pre-tool-use.js",
+        "powershell": "node hooks/copilot-pre-tool-use.js",
+        "timeoutSec": 5,
+        "comment": "v0.12.0 stdin-logging probe only - emits {} (pass-through). Logs preToolUse stdin keys + raw JSON to ~/.copilot/options-mode.log so we can confirm whether sessionId and shell command args are present, then decide on the hybrid+intercept toggle path for Issue B."
       }
     ]
   }

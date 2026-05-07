@@ -1,8 +1,8 @@
 #!/usr/bin/env pwsh
 # options-mode statusline badge for Claude Code.
-# Mirrors hooks/config.js::isOptionsActive() — per-session flag wins; on missing
-# flag, defer to global default (env -> file -> off). Renders [OPTIONS MODE] only
-# when effective mode is on; silent otherwise.
+# Mirrors hooks/config.js::getOptionsMode() — per-session flag wins; on missing
+# flag, defer to global default (env -> file -> off). Renders [OPTIONS MODE] for
+# on, [OPTIONS MODE: strict] for strict (v0.15.0+), silent otherwise.
 
 $ErrorActionPreference = 'SilentlyContinue'
 
@@ -35,7 +35,7 @@ function Read-FlagFile {
         if ($null -eq $Raw) { return $null }
         $Mode = ([string]$Raw).Trim().ToLowerInvariant()
         $Mode = ($Mode -replace '[^a-z0-9-]', '')
-        if ($Mode -ne 'on' -and $Mode -ne 'off') { return $null }
+        if ($Mode -ne 'on' -and $Mode -ne 'off' -and $Mode -ne 'strict') { return $null }
         return $Mode
     } catch {
         return $null
@@ -47,7 +47,7 @@ function Get-DefaultMode {
     $EnvMode = $env:OPTIONS_DEFAULT_MODE
     if ($EnvMode) {
         $EnvLower = $EnvMode.ToLowerInvariant()
-        if ($EnvLower -eq 'on' -or $EnvLower -eq 'off') { return $EnvLower }
+        if ($EnvLower -eq 'on' -or $EnvLower -eq 'off' -or $EnvLower -eq 'strict') { return $EnvLower }
     }
     $ConfigPath = Join-Path $ConfigDir 'options.json'
     if (-not (Test-Path -LiteralPath $ConfigPath)) { return $null }
@@ -57,7 +57,7 @@ function Get-DefaultMode {
         $Json = Get-Content -LiteralPath $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         if ($Json -and $Json.defaultMode) {
             $DefaultLower = ([string]$Json.defaultMode).ToLowerInvariant()
-            if ($DefaultLower -eq 'on' -or $DefaultLower -eq 'off') { return $DefaultLower }
+            if ($DefaultLower -eq 'on' -or $DefaultLower -eq 'off' -or $DefaultLower -eq 'strict') { return $DefaultLower }
         }
     } catch {
         return $null
@@ -91,7 +91,9 @@ if ($null -eq $Mode) {
     $Mode = $Default
 }
 
-if ($Mode -ne 'on') { exit 0 }
-
 $Esc = [char]27
-[Console]::Write("${Esc}[38;5;172m[OPTIONS MODE]${Esc}[0m")
+if ($Mode -eq 'on') {
+    [Console]::Write("${Esc}[38;5;172m[OPTIONS MODE]${Esc}[0m")
+} elseif ($Mode -eq 'strict') {
+    [Console]::Write("${Esc}[38;5;172m[OPTIONS MODE: strict]${Esc}[0m")
+}

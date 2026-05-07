@@ -1,93 +1,98 @@
 #!/usr/bin/env node
 
-// agentStop hook — schema is undocumented in public Copilot CLI docs as of 2026-05-03.
-// This hook logs the full stdin payload to ~/.copilot/options-mode.log so the schema
-// can be reverse-engineered empirically, then performs a best-effort enforcement check
-// by walking all string values in the payload and matching for either the
-// no-question tag substring or an ask_user tool invocation.
+// agentStop hook for GitHub Copilot CLI.
 //
-// If the heuristic detects a violation, the hook emits a decision payload using
-// multiple likely field-name conventions (decision/block, permissionDecision/permissionDecisionReason,
-// block/blockReason) so whichever shape Copilot honors will fire.
+// stdin shape (observed 2026-05-05, Copilot CLI 1.0.22+):
+//   { timestamp, cwd, sessionId, transcriptPath, stopReason }
 //
-// Always exits 0. Update the heuristic + emitted decision shape after observing real
-// agentStop stdin payloads in the log file.
+// stdin does NOT carry assistant text, so we read transcriptPath (events.jsonl),
+// walk backward to the most recent `assistant.message` event, and check it for
+// an `ask_user` toolRequest or the no-question tag substring in `data.content`.
+//
+// Block decision is emitted with multiple field-name shapes (decision/reason,
+// permissionDecision/permissionDecisionReason, block/blockReason) so whichever
+// shape Copilot honors will fire. Empirically `decision`+`reason` is honored —
+// the reason text is reinjected as the next user.message.
+//
+// Loop-counter give-up mirrors hooks/stop.js: keyed on
+// (transcriptPath, last-assistant-message id), bail after 5 consecutive blocks.
+
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 
 const {
   OPTIONS_NO_QUESTION_TAG,
-  isOptionsActive,
+  OPTIONS_BACKGROUND_TASK_TAG,
+  OPTIONS_BACKGROUND_AGENT_TAG,
+  getOptionsMode,
   readStdinJson,
-  appendLog
+  appendLog,
+  getConfigRoot
 } = require('./copilot-config');
 
-const ASK_USER_HINTS = ['"ask_user"', "'ask_user'", '"name":"ask_user"', '"tool":"ask_user"', '"tool_name":"ask_user"'];
+const BLOCK_REASON = `Add ${OPTIONS_NO_QUESTION_TAG} tag if this turn is not asking the user, or call ask_user with a choices array.`;
+const BLOCK_REASON_STRICT = `Strict options mode: call ask_user with a choices array, or append ${OPTIONS_BACKGROUND_TASK_TAG} or ${OPTIONS_BACKGROUND_AGENT_TAG} when polling.`;
 
-function collectStrings(node, out) {
-  if (node == null) return;
-  if (typeof node === 'string') {
-    out.push(node);
-    return;
-  }
-  if (Array.isArray(node)) {
-    for (const v of node) collectStrings(v, out);
-    return;
-  }
-  if (typeof node === 'object') {
-    for (const k of Object.keys(node)) collectStrings(node[k], out);
-  }
-}
-
-function hasNoQuestionTag(text) {
-  return text.indexOf(OPTIONS_NO_QUESTION_TAG) !== -1;
-}
-
-function hasAskUser(rawJson, joinedStrings) {
-  const haystack = rawJson + '\n' + joinedStrings;
-  for (const h of ASK_USER_HINTS) {
-    if (haystack.indexOf(h) !== -1) return true;
-  }
-  return false;
-}
-
-(function main() {
-  const stdin = readStdinJson();
-
-  if (!isOptionsActive()) {
-    process.stdout.write('{}');
-    process.exit(0);
-  }
-
-  let raw = '';
+function parseTranscript(transcriptPath) {
+  let raw;
   try {
-    raw = JSON.stringify(stdin);
-  } catch (e) {}
-
-  if (stdin && (stdin.agentStopActive === true || stdin.stop_hook_active === true)) {
-    appendLog('INFO agentStop short-circuit recursive');
-    process.stdout.write('{}');
-    process.exit(0);
+    raw = fs.readFileSync(transcriptPath, 'utf8');
+  } catch (e) {
+    return null;
   }
 
-  appendLog(`DEBUG agentStop stdin keys=${Object.keys(stdin || {}).join(',')} bytes=${raw.length}`);
-  appendLog(`DEBUG agentStop stdin raw=${raw.slice(0, 4000)}`);
-
-  const strings = [];
-  collectStrings(stdin, strings);
-  const joined = strings.join('\n');
-
-  if (hasNoQuestionTag(joined)) {
-    appendLog('INFO agentStop pass tag-found');
-    process.stdout.write('{}');
-    process.exit(0);
+  for (let end = raw.length; end > 0; ) {
+    let start = raw.lastIndexOf('\n', end - 1) + 1;
+    const line = raw.slice(start, end).trim();
+    end = start - 1;
+    if (!line) continue;
+    let evt;
+    try { evt = JSON.parse(line); } catch (e) { continue; }
+    if (evt && evt.type === 'assistant.message') return evt;
   }
 
-  if (hasAskUser(raw, joined)) {
-    appendLog('INFO agentStop pass ask_user-found');
-    process.stdout.write('{}');
-    process.exit(0);
-  }
+  return null;
+}
 
-  const reason = `Add ${OPTIONS_NO_QUESTION_TAG} tag if this turn is not asking the user, or call ask_user with a choices array.`;
+function extractContent(evt) {
+  const data = (evt && evt.data) || {};
+  const content = typeof data.content === 'string' ? data.content : '';
+  const toolRequests = Array.isArray(data.toolRequests) ? data.toolRequests : [];
+  let hasAskUser = false;
+  for (const req of toolRequests) {
+    if (req && typeof req === 'object' && req.name === 'ask_user') { hasAskUser = true; break; }
+  }
+  return { content, hasAskUser };
+}
+
+function assistantKey(evt, content) {
+  const id = evt && (evt.id || (evt.data && evt.data.messageId));
+  if (id) return String(id);
+  const hash = crypto.createHash('sha256').update(content).digest('hex').slice(0, 16);
+  return `${hash}:${content.length}`;
+}
+
+function counterPath(transcriptPath, key) {
+  const id = crypto.createHash('sha256').update(`${transcriptPath}\n${key}`).digest('hex').slice(0, 32);
+  return path.join(getConfigRoot(), `.options-stop-counter-${id}`);
+}
+
+function incrementLoopCounter(transcriptPath, key) {
+  const file = counterPath(transcriptPath, key);
+  let count = 0;
+  try { count = Number(fs.readFileSync(file, 'utf8')) || 0; } catch (e) {}
+  count += 1;
+  try { fs.writeFileSync(file, String(count)); } catch (e) {}
+  return count;
+}
+
+function emitPass() {
+  process.stdout.write('{}');
+  process.exit(0);
+}
+
+function emitBlock(reason) {
   const decision = {
     decision: 'block',
     reason,
@@ -96,7 +101,69 @@ function hasAskUser(rawJson, joinedStrings) {
     block: true,
     blockReason: reason
   };
-  appendLog(`WARN agentStop block reason="${reason.slice(0, 120)}"`);
   process.stdout.write(JSON.stringify(decision));
   process.exit(0);
+}
+
+(function main() {
+  const stdin = readStdinJson();
+
+  if (stdin && (stdin.agentStopActive === true || stdin.stop_hook_active === true)) {
+    appendLog('INFO agentStop short-circuit recursive');
+    emitPass();
+  }
+
+  let mode = 'on';
+  try { mode = getOptionsMode(); } catch (e) {}
+  if (mode !== 'on' && mode !== 'strict') emitPass();
+
+  const transcriptPath = stdin && (stdin.transcriptPath || stdin.transcript_path);
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) {
+    appendLog(`DEBUG agentStop no transcriptPath path=${transcriptPath || ''}`);
+    emitPass();
+  }
+
+  const evt = parseTranscript(transcriptPath);
+  if (!evt) {
+    appendLog('DEBUG agentStop no assistant.message in transcript');
+    emitPass();
+  }
+
+  const { content, hasAskUser } = extractContent(evt);
+
+  if (hasAskUser) {
+    appendLog('INFO agentStop pass ask_user-found');
+    emitPass();
+  }
+
+  const reason = mode === 'strict' ? BLOCK_REASON_STRICT : BLOCK_REASON;
+
+  if (content.indexOf(OPTIONS_BACKGROUND_TASK_TAG) !== -1) {
+    appendLog(`INFO agentStop pass background-task-tag-found mode=${mode}`);
+    emitPass();
+  }
+  if (content.indexOf(OPTIONS_BACKGROUND_AGENT_TAG) !== -1) {
+    appendLog(`INFO agentStop pass background-agent-tag-found mode=${mode}`);
+    emitPass();
+  }
+  if (mode !== 'strict' && content.indexOf(OPTIONS_NO_QUESTION_TAG) !== -1) {
+    appendLog('INFO agentStop pass no-question-tag-found');
+    emitPass();
+  }
+
+  if (!content.trim()) {
+    appendLog('INFO agentStop pass empty-content (intermediate tool turn)');
+    emitPass();
+  }
+
+  const key = assistantKey(evt, content);
+  const count = incrementLoopCounter(transcriptPath, key);
+  if (count > 5) {
+    appendLog(`WARN agentStop gave up after ${count} blocks for ${transcriptPath} ${key}`);
+    try { fs.unlinkSync(counterPath(transcriptPath, key)); } catch (e) {}
+    emitPass();
+  }
+
+  appendLog(`WARN agentStop block count=${count} key=${key} mode=${mode} reason="${reason.slice(0, 120)}"`);
+  emitBlock(reason);
 })();

@@ -1,6 +1,6 @@
 {
   "name": "options-mode",
-  "version": "0.10.0",
+  "version": "0.15.4",
   "description": "Options mode: choice-prompt enforcement hooks for Claude Code and repo-local Codex sessions",
   "author": {
     "name": "Evyatar Mitrani",
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "Options Mode",
     "shortDescription": "Enforce choice prompts when an agent needs user input.",
-    "longDescription": "Options Mode enforces choice-prompt mode in Claude Code via SessionStart rule injection, a `/options-mode on|off|status` slash command, and a deterministic Stop-hook tag protocol; repo-local Codex sessions get SessionStart context injection.",
+    "longDescription": "Options Mode enforces choice-prompt mode in Claude Code and GitHub Copilot CLI via SessionStart rule injection, a `/options-mode on|off|strict|status` slash command, and a deterministic Stop-hook tag protocol. Strict mode requires every response to include concrete choices. Repo-local Codex sessions get SessionStart context injection.",
     "developerName": "Evyatar Mitrani",
     "category": "Productivity",
     "capabilities": [
