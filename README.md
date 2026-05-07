@@ -32,13 +32,13 @@ Same decision. Seconds instead of a minute. Works the same in a terminal, on an 
 Register the marketplace once:
 
 ```text
-/plugin marketplace add gim-home/ai-developer-toolkit
+/plugin marketplace add Evyatar108/options-mode
 ```
 
 Install the plugin:
 
 ```text
-/plugin install options-mode@ai-developer-toolkit --scope user
+/plugin install options-mode@options-mode --scope user
 ```
 
 Restart your CLI after installation so SessionStart hooks are loaded. Works on Claude Code and GitHub Copilot CLI.
