@@ -5,6 +5,7 @@ const path = require('path');
 const {
   OPTIONS_RULES_TEXT,
   OPTIONS_RULES_TEXT_STRICT,
+  OPTIONS_RULES_TEXT_AUTO,
   getConfigRoot,
   getOptionsMode
 } = require('./config');
@@ -49,6 +50,7 @@ readStdin(raw => {
   const mode = getOptionsMode(sessionId);
   let rulesBlock = '';
   if (mode === 'strict') rulesBlock = OPTIONS_RULES_TEXT_STRICT;
+  else if (mode === 'auto') rulesBlock = OPTIONS_RULES_TEXT_AUTO;
   else if (mode === 'on') rulesBlock = OPTIONS_RULES_TEXT;
 
   const output = [rulesBlock, statuslineReminder(configRoot)]

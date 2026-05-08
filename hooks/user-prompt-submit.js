@@ -3,6 +3,7 @@
 const {
   OPTIONS_RULES_TEXT,
   OPTIONS_RULES_TEXT_STRICT,
+  OPTIONS_RULES_TEXT_AUTO,
   VALID_MODES,
   getFlagPath,
   getOptionsMode,
@@ -67,16 +68,18 @@ readStdin(raw => {
         block(`options mode default: ${defaultRaw === null ? 'unset' : defaultRaw}`);
         return;
       }
-      block('options mode: usage /options-mode on|off|strict|status|default [on|off|strict|clear|status]');
+      block('options mode: usage /options-mode on|off|strict|auto|status|default [on|off|strict|auto|clear|status]');
       return;
     }
-    block('options mode: usage /options-mode on|off|strict|status|default [on|off|strict|clear|status]');
+    block('options mode: usage /options-mode on|off|strict|auto|status|default [on|off|strict|auto|clear|status]');
     return;
   }
 
   const mode = getOptionsMode(sessionId);
-  if (mode === 'on' || mode === 'strict') {
-    const rules = mode === 'strict' ? OPTIONS_RULES_TEXT_STRICT : OPTIONS_RULES_TEXT;
+  if (mode === 'on' || mode === 'strict' || mode === 'auto') {
+    const rules = mode === 'strict' ? OPTIONS_RULES_TEXT_STRICT
+      : mode === 'auto' ? OPTIONS_RULES_TEXT_AUTO
+      : OPTIONS_RULES_TEXT;
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: {
         hookEventName: 'UserPromptSubmit',

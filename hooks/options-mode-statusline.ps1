@@ -35,7 +35,7 @@ function Read-FlagFile {
         if ($null -eq $Raw) { return $null }
         $Mode = ([string]$Raw).Trim().ToLowerInvariant()
         $Mode = ($Mode -replace '[^a-z0-9-]', '')
-        if ($Mode -ne 'on' -and $Mode -ne 'off' -and $Mode -ne 'strict') { return $null }
+        if ($Mode -ne 'on' -and $Mode -ne 'off' -and $Mode -ne 'strict' -and $Mode -ne 'auto') { return $null }
         return $Mode
     } catch {
         return $null
@@ -47,7 +47,7 @@ function Get-DefaultMode {
     $EnvMode = $env:OPTIONS_DEFAULT_MODE
     if ($EnvMode) {
         $EnvLower = $EnvMode.ToLowerInvariant()
-        if ($EnvLower -eq 'on' -or $EnvLower -eq 'off' -or $EnvLower -eq 'strict') { return $EnvLower }
+        if ($EnvLower -eq 'on' -or $EnvLower -eq 'off' -or $EnvLower -eq 'strict' -or $EnvLower -eq 'auto') { return $EnvLower }
     }
     $ConfigPath = Join-Path $ConfigDir 'options.json'
     if (-not (Test-Path -LiteralPath $ConfigPath)) { return $null }
@@ -57,7 +57,7 @@ function Get-DefaultMode {
         $Json = Get-Content -LiteralPath $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         if ($Json -and $Json.defaultMode) {
             $DefaultLower = ([string]$Json.defaultMode).ToLowerInvariant()
-            if ($DefaultLower -eq 'on' -or $DefaultLower -eq 'off' -or $DefaultLower -eq 'strict') { return $DefaultLower }
+            if ($DefaultLower -eq 'on' -or $DefaultLower -eq 'off' -or $DefaultLower -eq 'strict' -or $DefaultLower -eq 'auto') { return $DefaultLower }
         }
     } catch {
         return $null
@@ -96,4 +96,6 @@ if ($Mode -eq 'on') {
     [Console]::Write("${Esc}[38;5;172m[OPTIONS MODE]${Esc}[0m")
 } elseif ($Mode -eq 'strict') {
     [Console]::Write("${Esc}[38;5;172m[OPTIONS MODE: strict]${Esc}[0m")
+} elseif ($Mode -eq 'auto') {
+    [Console]::Write("${Esc}[38;5;172m[OPTIONS MODE: auto]${Esc}[0m")
 }

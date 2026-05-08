@@ -291,7 +291,7 @@ test_user_prompt_submit_commands() {
   before="$(cat "$dir/.options-active")"
   out="$(run_user_prompt_submit "$dir" '/options-mode foo')"
   after="$(cat "$dir/.options-active")"
-  assert_block_reason test_user_prompt_submit_foo "$out" 'options mode: usage /options-mode on|off|strict|status|default [on|off|strict|clear|status]'
+  assert_block_reason test_user_prompt_submit_foo "$out" 'options mode: usage /options-mode on|off|strict|auto|status|default [on|off|strict|auto|clear|status]'
   [[ "$before" == "$after" ]] || fail test_user_prompt_submit_commands "foo mutated flag"
 }
 
@@ -299,6 +299,11 @@ test_hooks_json_wiring() {
   node <<'NODE'
 const fs = require('fs');
 const hooks = JSON.parse(fs.readFileSync('plugins/options-mode/hooks/hooks.json', 'utf8')).hooks;
+const preToolUse = hooks.PreToolUse;
+if (!preToolUse || !preToolUse[0]) throw new Error('PreToolUse entry missing');
+if (preToolUse[0].matcher !== 'AskUserQuestion') throw new Error('bad PreToolUse matcher: ' + preToolUse[0].matcher);
+if (!preToolUse[0].hooks || !preToolUse[0].hooks[0]) throw new Error('PreToolUse hooks missing');
+if (preToolUse[0].hooks[0].command !== 'node ${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use.js') throw new Error('bad PreToolUse command: ' + preToolUse[0].hooks[0].command);
 const session = hooks.SessionStart[0];
 if (session.matcher !== 'startup|resume|compact|clear') throw new Error('bad SessionStart matcher');
 const sessionHook = session.hooks[0];
@@ -317,7 +322,7 @@ NODE
 test_config_exports() {
   node <<'NODE'
 const config = require('./plugins/options-mode/hooks/config');
-for (const key of ['OPTIONS_NO_QUESTION_TAG', 'OPTIONS_BACKGROUND_TASK_TAG', 'OPTIONS_BACKGROUND_AGENT_TAG', 'OPTIONS_RULES_TEXT', 'OPTIONS_RULES_TEXT_STRICT', 'escapeForBashSingleQuote', 'getFlagPath', 'getConfigRoot', 'getConfigPath', 'getDefaultMode', 'getDefaultModeRaw', 'setDefaultMode', 'clearDefaultMode', 'isOptionsActive', 'getOptionsMode', 'hasValidFlag']) {
+for (const key of ['OPTIONS_NO_QUESTION_TAG', 'OPTIONS_BACKGROUND_TASK_TAG', 'OPTIONS_BACKGROUND_AGENT_TAG', 'OPTIONS_TASK_COMPLETE_TAG', 'OPTIONS_RULES_TEXT', 'OPTIONS_RULES_TEXT_STRICT', 'OPTIONS_RULES_TEXT_AUTO', 'escapeForBashSingleQuote', 'getFlagPath', 'getConfigRoot', 'getConfigPath', 'getDefaultMode', 'getDefaultModeRaw', 'setDefaultMode', 'clearDefaultMode', 'isOptionsActive', 'getOptionsMode', 'hasValidFlag']) {
   if (!(key in config)) throw new Error(`missing export ${key}`);
 }
 for (const key of ['spawn' + 'CodexSync', 'resolve' + 'CodexCommand']) {
@@ -326,7 +331,9 @@ for (const key of ['spawn' + 'CodexSync', 'resolve' + 'CodexCommand']) {
 if (config.OPTIONS_NO_QUESTION_TAG !== '<options-mode>no-question</options-mode>') throw new Error('bad no-question tag');
 if (config.OPTIONS_BACKGROUND_TASK_TAG !== '<options-mode>background-task</options-mode>') throw new Error('bad background-task tag');
 if (config.OPTIONS_BACKGROUND_AGENT_TAG !== '<options-mode>background-agent</options-mode>') throw new Error('bad background-agent tag');
-if (config.VALID_MODES.join(',') !== 'on,off,strict') throw new Error('bad modes: ' + config.VALID_MODES.join(','));
+if (config.VALID_MODES.join(',') !== 'on,off,strict,auto') throw new Error('bad modes: ' + config.VALID_MODES.join(','));
+if (config.OPTIONS_TASK_COMPLETE_TAG !== '<options-mode>task-complete</options-mode>') throw new Error('bad task-complete tag: ' + config.OPTIONS_TASK_COMPLETE_TAG);
+if (typeof config.OPTIONS_RULES_TEXT_AUTO !== 'string' || config.OPTIONS_RULES_TEXT_AUTO.indexOf('OPTIONS MODE ACTIVE (auto)') === -1) throw new Error('bad OPTIONS_RULES_TEXT_AUTO');
 NODE
   pass test_config_exports
 }
@@ -387,6 +394,12 @@ test_statusline_bash() {
   out="$(run_statusline_bash "$dir" "")"
   [[ "$out" == *"[OPTIONS MODE]"* ]] || fail test_statusline_bash "legacy fallback on did not render [OPTIONS MODE]"
 
+  # 7. Per-session flag = auto -> [OPTIONS MODE: auto]
+  dir="$(mktemp -d)"
+  printf auto > "$dir/$flag_name"
+  out="$(run_statusline_bash "$dir" "{\"session_id\":\"$sid\"}")"
+  [[ "$out" == *"[OPTIONS MODE: auto]"* ]] || fail test_statusline_bash "per-session auto did not render [OPTIONS MODE: auto]: '$out'"
+
   pass test_statusline_bash
 }
 
@@ -433,6 +446,12 @@ test_statusline_powershell() {
   printf on > "$dir/.options-active"
   out="$(run_statusline_pwsh "$ps_bin" "$dir" "")"
   [[ "$out" == *"[OPTIONS MODE]"* ]] || fail test_statusline_powershell "legacy fallback on did not render [OPTIONS MODE]"
+
+  # 7. Per-session flag = auto -> [OPTIONS MODE: auto]
+  dir="$(mktemp -d)"
+  printf auto > "$dir/$flag_name"
+  out="$(run_statusline_pwsh "$ps_bin" "$dir" "{\"session_id\":\"$sid\"}")"
+  [[ "$out" == *"[OPTIONS MODE: auto]"* ]] || fail test_statusline_powershell "per-session auto did not render [OPTIONS MODE: auto]: '$out'"
 
   pass test_statusline_powershell
 }
@@ -921,7 +940,7 @@ test_bad_default_subarg() {
   local dir out
   dir="$(mktemp -d)"
   out="$(run_user_prompt_submit "$dir" '/options-mode default bogus')"
-  assert_block_reason test_bad_default_subarg_block "$out" 'options mode: usage /options-mode on|off|strict|status|default [on|off|strict|clear|status]'
+  assert_block_reason test_bad_default_subarg_block "$out" 'options mode: usage /options-mode on|off|strict|auto|status|default [on|off|strict|auto|clear|status]'
   [[ ! -e "$dir/options.json" ]] || fail test_bad_default_subarg "bogus subarg created options.json"
   pass test_bad_default_subarg
 }
@@ -1188,7 +1207,7 @@ test_user_prompt_submit_usage_includes_strict() {
   local dir out
   dir="$(mktemp -d)"
   out="$(run_user_prompt_submit "$dir" '/options-mode bogus')"
-  assert_block_reason test_user_prompt_submit_usage_includes_strict "$out" 'options mode: usage /options-mode on|off|strict|status|default [on|off|strict|clear|status]'
+  assert_block_reason test_user_prompt_submit_usage_includes_strict "$out" 'options mode: usage /options-mode on|off|strict|auto|status|default [on|off|strict|auto|clear|status]'
 }
 
 test_statusline_bash_strict() {
@@ -1291,6 +1310,132 @@ test_required_fixtures_exist() {
   pass test_required_fixtures_exist
 }
 
+run_pre_tool_use() {
+  local config_root="$1"
+  shift
+  CLAUDE_CONFIG_DIR="$config_root" HOME="$config_root/home" \
+    "$NODE_BIN" "$PLUGIN_ROOT/hooks/pre-tool-use.js" "$@"
+}
+
+test_auto_mode_pre_tool_use_intercepts_ask_user_question() {
+  local dir out sid="sess-auto-ptu"
+  local flag_name
+  flag_name="$(session_flag_name "$sid")"
+  dir="$(mktemp -d)"
+  printf auto > "$dir/$flag_name"
+  out="$(echo '{"tool_name":"AskUserQuestion","session_id":"'"$sid"'"}' | CLAUDE_CONFIG_DIR="$dir" HOME="$dir/home" "$NODE_BIN" "$PLUGIN_ROOT/hooks/pre-tool-use.js")"
+  OUT="$out" node <<'NODE'
+const out = JSON.parse(process.env.OUT);
+if (out.decision !== 'block') throw new Error(`decision was ${out.decision}`);
+if (out.reason.indexOf("user isn't here") === -1) throw new Error(`unexpected reason: ${out.reason}`);
+NODE
+  pass test_auto_mode_pre_tool_use_intercepts_ask_user_question
+}
+
+test_auto_mode_pre_tool_use_skips_other_tools() {
+  local dir out sid="sess-auto-ptu-skip"
+  local flag_name
+  flag_name="$(session_flag_name "$sid")"
+  dir="$(mktemp -d)"
+  printf auto > "$dir/$flag_name"
+  out="$(echo '{"tool_name":"Bash","session_id":"'"$sid"'"}' | CLAUDE_CONFIG_DIR="$dir" HOME="$dir/home" "$NODE_BIN" "$PLUGIN_ROOT/hooks/pre-tool-use.js")"
+  [[ -z "$out" ]] || fail test_auto_mode_pre_tool_use_skips_other_tools "expected empty, got: $out"
+  pass test_auto_mode_pre_tool_use_skips_other_tools
+}
+
+test_auto_mode_pre_tool_use_skips_non_auto_mode() {
+  local dir out sid="sess-on-ptu"
+  local flag_name
+  flag_name="$(session_flag_name "$sid")"
+  dir="$(mktemp -d)"
+  printf on > "$dir/$flag_name"
+  out="$(echo '{"tool_name":"AskUserQuestion","session_id":"'"$sid"'"}' | CLAUDE_CONFIG_DIR="$dir" HOME="$dir/home" "$NODE_BIN" "$PLUGIN_ROOT/hooks/pre-tool-use.js")"
+  [[ -z "$out" ]] || fail test_auto_mode_pre_tool_use_skips_non_auto_mode "expected empty, got: $out"
+  pass test_auto_mode_pre_tool_use_skips_non_auto_mode
+}
+
+test_auto_mode_task_complete_tag_passes() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf auto > "$dir/.options-active"
+  transcript="$(mktemp)"
+  write_strict_transcript "$transcript" $'Task is done.\n<options-mode>task-complete</options-mode>'
+  out="$(run_stop_json "$dir" "$transcript")"
+  assert_empty_output test_auto_mode_task_complete_tag_passes "$out"
+}
+
+test_auto_mode_no_question_tag_blocks() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf auto > "$dir/.options-active"
+  transcript="$(mktemp)"
+  write_strict_transcript "$transcript" $'Done.\n<options-mode>no-question</options-mode>'
+  out="$(run_stop_json "$dir" "$transcript")"
+  OUT="$out" node <<'NODE'
+const out = JSON.parse(process.env.OUT);
+if (out.decision !== 'block') throw new Error(`decision was ${out.decision}`);
+if (out.reason.indexOf('auto') === -1 && out.reason.indexOf('task-complete') === -1) throw new Error(`reason did not mention auto/task-complete: ${out.reason}`);
+NODE
+  pass test_auto_mode_no_question_tag_blocks
+}
+
+test_auto_mode_background_task_tag_passes() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf auto > "$dir/.options-active"
+  transcript="$(mktemp)"
+  write_strict_transcript "$transcript" $'Build running.\n<options-mode>background-task</options-mode>'
+  out="$(run_stop_json "$dir" "$transcript")"
+  assert_empty_output test_auto_mode_background_task_tag_passes "$out"
+}
+
+test_session_start_auto_emits_auto_rules() {
+  local sid="sess-auto-rules" dir out
+  local flag_name
+  flag_name="$(session_flag_name "$sid")"
+  dir="$(mktemp -d)"
+  printf auto > "$dir/$flag_name"
+  out="$(run_session_start startup "$dir" "$sid")"
+  [[ "$out" == *"OPTIONS MODE ACTIVE (auto)"* ]] || fail test_session_start_auto_emits_auto_rules "missing auto anchor"
+  [[ "$out" == *"task-complete"* ]] || fail test_session_start_auto_emits_auto_rules "missing task-complete anchor"
+  [[ "$out" == *"AskUserQuestion"* ]] || fail test_session_start_auto_emits_auto_rules "missing AskUserQuestion anchor"
+  pass test_session_start_auto_emits_auto_rules
+}
+
+test_copilot_auto_mode_task_complete_tag_passes() {
+  local dir transcript out
+  dir="$(mktemp -d)"
+  printf auto > "$dir/.options-mode-active"
+  transcript="$(mktemp)"
+  write_copilot_transcript "$transcript" $'Task finished.\n[//]: # (options-mode-task-complete)'
+  out="$(run_copilot_agent_stop "$dir" "$transcript")"
+  [[ "$out" == '{}' ]] || fail test_copilot_auto_mode_task_complete_tag_passes "expected pass {}, got: $out"
+  pass test_copilot_auto_mode_task_complete_tag_passes
+}
+
+test_user_prompt_submit_auto_writes_flag() {
+  local dir out
+  dir="$(mktemp -d)"
+  out="$(run_user_prompt_submit "$dir" '/options-mode auto')"
+  assert_block_reason test_user_prompt_submit_auto_writes_flag_block "$out" 'options mode: auto'
+  [[ "$(cat "$dir/.options-active")" == "auto" ]] || fail test_user_prompt_submit_auto_writes_flag "auto did not write flag"
+  pass test_user_prompt_submit_auto_writes_flag
+}
+
+test_get_options_mode_returns_auto() {
+  local dir sid="sess-auto-mode"
+  local flag_name
+  flag_name="$(session_flag_name "$sid")"
+  dir="$(mktemp -d)"
+  printf auto > "$dir/$flag_name"
+  CLAUDE_CONFIG_DIR="$dir" SID="$sid" node <<'NODE'
+const { getOptionsMode, isOptionsActive } = require('./plugins/options-mode/hooks/config');
+if (getOptionsMode(process.env.SID) !== 'auto') throw new Error(`expected auto, got ${getOptionsMode(process.env.SID)}`);
+if (isOptionsActive(process.env.SID) !== true) throw new Error('isOptionsActive should be true for auto');
+NODE
+  pass test_get_options_mode_returns_auto
+}
+
 cd "$ROOT"
 test_codex_plugin_interface_fields
 test_copilot_skills_dir_renamed
@@ -1363,3 +1508,13 @@ test_user_prompt_submit_usage_includes_strict
 test_statusline_bash_strict
 test_statusline_powershell_strict
 test_session_start_strict_emits_strict_rules
+test_get_options_mode_returns_auto
+test_user_prompt_submit_auto_writes_flag
+test_auto_mode_pre_tool_use_intercepts_ask_user_question
+test_auto_mode_pre_tool_use_skips_other_tools
+test_auto_mode_pre_tool_use_skips_non_auto_mode
+test_auto_mode_task_complete_tag_passes
+test_auto_mode_no_question_tag_blocks
+test_auto_mode_background_task_tag_passes
+test_session_start_auto_emits_auto_rules
+test_copilot_auto_mode_task_complete_tag_passes

@@ -2,6 +2,34 @@
 
 Options Mode is a hook-only plugin. Runtime code is CommonJS under `hooks/`; tests live in `tests/run.sh` and must stay offline/deterministic by using isolated `CLAUDE_CONFIG_DIR`, `COPILOT_CONFIG_DIR`, and `HOME` roots.
 
+## v0.16.0 Migration Note
+
+Two UX improvements:
+
+**Feature 1 — Recommended-first ordering unconditional.** All four rules-text constants (`OPTIONS_RULES_TEXT`, `OPTIONS_RULES_TEXT_STRICT`, `OPTIONS_RULES_FOR_COPILOT`, `OPTIONS_RULES_FOR_COPILOT_STRICT`) changed line from "Include a Recommended option first when one option is clearly best." to "Always put the recommended or default option first (as Option 1). Label it 'Recommended' to make the best choice obvious." `.codex/hooks.json` inline command byte-synced accordingly (hand-edit only; `test_rule_text_sync` enforces).
+
+**Feature 2 — New `auto` mode.** Builds on `strict`. Four valid post-turn states:
+
+1. `AskUserQuestion` tool call — `PreToolUse` hook intercepts before UI renders and returns `"The user isn't here right now, please try to continue as much as possible."`. Model proceeds autonomously.
+2. `<options-mode>task-complete</options-mode>` — new tag; model uses when task is genuinely done (no user interaction needed). Copilot form: `[//]: # (options-mode-task-complete)`.
+3. `<options-mode>background-task</options-mode>` / `<options-mode>background-agent</options-mode>` — existing bg tags, pass as usual.
+4. `no-question` tag — **NOT valid** in auto mode (strict-based, no prose escape).
+
+New files/changes:
+- `hooks/pre-tool-use.js` — new PreToolUse hook (Claude Code); intercepts `AskUserQuestion` in auto mode.
+- `hooks/hooks.json` — new `PreToolUse` entry, matcher `AskUserQuestion`, command `node ${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use.js`.
+- `hooks/copilot-pre-tool-use.js` — rewritten from probe stub; adds auto-continue before pass-through `{}`.
+- `hooks/config.js` — `'auto'` added to `VALID_MODES`; `OPTIONS_TASK_COMPLETE_TAG`; `OPTIONS_RULES_TEXT_AUTO`; `isOptionsActive()` includes `auto`.
+- `hooks/copilot-config.js` — same for Copilot surface; `OPTIONS_TASK_COMPLETE_TAG = '[//]: # (options-mode-task-complete)'`; `OPTIONS_RULES_FOR_COPILOT_AUTO`.
+- `hooks/stop.js` — no-question guard extended to exclude `auto`; task-complete tag added; `BLOCK_REASON_AUTO` inline.
+- `hooks/copilot-agent-stop.js` — active-mode guard widened to include `auto`; same stop.js changes mirrored.
+- `hooks/session-start.js`, `hooks/copilot-session-start.js` — emit `OPTIONS_RULES_TEXT_AUTO` / `OPTIONS_RULES_FOR_COPILOT_AUTO` when mode is `auto`.
+- `hooks/user-prompt-submit.js` — re-injects `OPTIONS_RULES_TEXT_AUTO` for auto; usage strings updated.
+- Statusline scripts — both `.sh` and `.ps1` accept `auto`; badge renders `[OPTIONS MODE: auto]`.
+- `OPTIONS_RULES_TEXT_AUTO` is intentionally NOT byte-synced to `.codex/hooks.json` (same design as `OPTIONS_RULES_TEXT_STRICT`).
+
+Bumps `0.15.4` → `0.16.0` across all three plugin manifests and all three marketplace indexes.
+
 ## v0.15.4 Migration Note
 
 **Copilot strict rules: `allow_freeform: true` is now permitted alongside populated `choices`.** v0.15.2 forced `allow_freeform: false` in strict, on the theory that "the user picks, not types". In practice that strips a useful Copilot affordance — the user can both pick a labeled choice AND type a freeform answer when neither label fits — without addressing the original UX bug. Re-reading that bug: the symptom was an `ask_user` call with `allow_freeform: true` AND no `choices`, leaving only a typed-text input. The bug is the missing `choices`, not the freeform flag.
@@ -200,6 +228,8 @@ Harness checks use these stable substrings from `hooks/config.js::OPTIONS_RULES_
 
 The strict-mode rules-text constants — `hooks/config.js::OPTIONS_RULES_TEXT_STRICT` and `hooks/copilot-config.js::OPTIONS_RULES_FOR_COPILOT_STRICT` (both added in v0.15.0) — share the v0.15.0-specific anchors `strict` (the literal keyword in `OPTIONS MODE ACTIVE (strict).`), the surface-specific `background-task` and `background-agent` substrings, plus the surface-specific tool name (`AskUserQuestion` / `ask_user`). The `no-question` substring also appears in both strict variants but only as a callout that it is **not** a valid bypass — harness checks that want to assert strict-mode rules emission should match on `background-task` plus `background-agent` (with the bare-XML form on Claude Code and the reference-link form on Copilot) rather than on `no-question`. `OPTIONS_RULES_TEXT_STRICT` is intentionally not byte-synced to `.codex/hooks.json`.
 
+The auto-mode rules-text constants — `hooks/config.js::OPTIONS_RULES_TEXT_AUTO` and `hooks/copilot-config.js::OPTIONS_RULES_FOR_COPILOT_AUTO` (added in v0.16.0) — use the anchors: `OPTIONS MODE ACTIVE (auto)` (the literal keyword), `AskUserQuestion`/`ask_user`, `task-complete`, `background-task`, `background-agent`. `OPTIONS_RULES_TEXT_AUTO` is intentionally NOT byte-synced to `.codex/hooks.json` (same design as `OPTIONS_RULES_TEXT_STRICT` — Codex advisory path receives only the `on`-mode rules).
+
 ## Flag Contract
 
 As of v0.4.0 the mode flag is **per session**: `<configRoot>/.options-active-<sha256(session_id)[0:32]>`, containing literal `on` or `off`. The legacy single-machine path `<configRoot>/.options-active` is retained as the back-compat fallback when a hook receives no `session_id` (for older Claude Code builds and for repo-level harness scripts that do not propagate the session id). The default mode is `off` (was `on` through v0.3.0): a session with no flag file falls back to the global default (see Global Default below) and is inactive when that resolves to `off`. `/options-mode on` writes the per-session flag, so each session opts in independently. Read failure semantics differ from missing semantics: `_readFlagInternal()` distinguishes ENOENT (returns `null`, defers to `getDefaultMode()`) from real read errors (rethrown so `isOptionsActive()` fails open to active). The legacy intentional-divergence-from-caveman naming (`.options-*` temp-file prefixes, options-mode-specific error text) is unchanged.
@@ -232,7 +262,7 @@ The statusline reminder is gated by `<configRoot>/.options-statusline-warn` and 
 { "defaultMode": "on" }
 ```
 
-`defaultMode` accepts `"on"` or `"off"`; any other value is ignored. `setDefaultMode(mode)` and `clearDefaultMode()` perform an atomic read-modify-write (preserving any other keys callers may have stored) using the same `lstat` symlink check + `O_EXCL | O_NOFOLLOW` temp + `renameSync` pattern as `safeWriteFlag()`. The same TOCTOU acceptance applies — see Flag Contract above and the in-code comment in `_writeConfigJsonAtomic()`. `clearDefaultMode()` deletes the key and `unlinkSync`s the file when the resulting object is empty so `~/.claude/options.json` does not linger as `{}`.
+`defaultMode` accepts `"on"`, `"off"`, or `"auto"`; any other value is ignored. `setDefaultMode(mode)` and `clearDefaultMode()` perform an atomic read-modify-write (preserving any other keys callers may have stored) using the same `lstat` symlink check + `O_EXCL | O_NOFOLLOW` temp + `renameSync` pattern as `safeWriteFlag()`. The same TOCTOU acceptance applies — see Flag Contract above and the in-code comment in `_writeConfigJsonAtomic()`. `clearDefaultMode()` deletes the key and `unlinkSync`s the file when the resulting object is empty so `~/.claude/options.json` does not linger as `{}`.
 
 `getDefaultModeRaw()` returns `'on' | 'off' | null`, distinguishing "explicitly set" from "unset". `getDefaultMode()` is a thin wrapper that maps `null` to `'off'` for callers that just want the effective default. The status report uses `getDefaultModeRaw()` so it can render `unset` instead of fabricating an `off`.
 
@@ -250,19 +280,19 @@ Decision flow:
 2. If `session_id` is present, compute `<configRoot>/.options-active-<sha256(session_id)[0:32]>` and read it via the same safety guards as the hooks (refuse symlinks/reparse points, cap at 64 bytes, lowercase + `[a-z0-9-]` whitelist, accept only `on`/`off`).
 3. If `session_id` is absent, fall back to the legacy `<configRoot>/.options-active` path — same back-compat boundary as `getFlagPath()`.
 4. If neither flag yields a valid mode, defer to `getDefaultMode()` precedence: `OPTIONS_DEFAULT_MODE` env var → `<configRoot>/options.json::defaultMode` → unset.
-5. Render `[OPTIONS MODE]` in ANSI 172 (orange) only when the effective mode resolves to `on`; exit 0 silently for `off`, unset, parse errors, missing files, or any other failure (fail-silent-on-error policy).
+5. Render `[OPTIONS MODE]` in ANSI 172 (orange) when the effective mode resolves to `on`; render `[OPTIONS MODE: strict]` for `strict`; render `[OPTIONS MODE: auto]` for `auto`; exit 0 silently for `off`, unset, parse errors, missing files, or any other failure (fail-silent-on-error policy).
 
 The badge is intentionally invisible when the effective mode is `off`, matching the caveman pattern. Do not re-introduce `[OPTIONS:OFF]`. The portable sha256 helper in `options-mode-statusline.sh` tries `sha256sum` first (Git Bash/Linux) and falls back to `shasum -a 256` (macOS); statusline tests must not depend on `jq` being installed.
 
 ## UserPromptSubmit Contract
 
-`hooks/user-prompt-submit.js` owns `/options-mode on|off|strict|status` and `/options-mode default [on|off|strict|clear|status]`. Per-session subcommands write literal flag values and emit `{"decision":"block","reason":"options mode: <state>"}`. The `default` subcommand variants emit `options mode default: <on|off|strict|cleared|unset>` (with `default` alone aliasing to `default status`). The status report includes session and default state in a parseable suffix:
+`hooks/user-prompt-submit.js` owns `/options-mode on|off|strict|auto|status` and `/options-mode default [on|off|strict|auto|clear|status]`. Per-session subcommands write literal flag values and emit `{"decision":"block","reason":"options mode: <state>"}`. The `default` subcommand variants emit `options mode default: <on|off|strict|auto|cleared|unset>` (with `default` alone aliasing to `default status`). The status report includes session and default state in a parseable suffix:
 
 ```
-options mode: <effective> (session=<on|off|strict|unset>, default=<on|off|strict|unset>)
+options mode: <effective> (session=<on|off|strict|auto|unset>, default=<on|off|strict|auto|unset>)
 ```
 
-The leading `options mode:` token is preserved for log/grep parsers; only the parenthetical is new. Bad subcommands return the usage line `options mode: usage /options-mode on|off|strict|status|default [on|off|strict|clear|status]`. Mode-set dispatch gates on `VALID_MODES.includes(arg)` (set in `hooks/config.js`), so adding a future mode only requires widening that list.
+The leading `options mode:` token is preserved for log/grep parsers; only the parenthetical is new. Bad subcommands return the usage line `options mode: usage /options-mode on|off|strict|auto|status|default [on|off|strict|auto|clear|status]`. Mode-set dispatch gates on `VALID_MODES.includes(arg)` (set in `hooks/config.js`), so adding a future mode only requires widening that list.
 
 ## Stop-Hook Contract
 
@@ -275,9 +305,9 @@ The leading `options mode:` token is preserved for log/grep parsers; only the pa
 5. Parse the transcript from the end and fail open when no valid assistant envelope is found.
 6. Normalize the last assistant content and exit empty when it contains an `AskUserQuestion` `tool_use` block.
 7. Exit empty when normalized assistant text is blank.
-8. Resolve the effective mode via `getOptionsMode(session_id)`. Exit empty when the assistant text contains the `<options-mode>background-task</options-mode>` or `<options-mode>background-agent</options-mode>` substring (accepted in both `on` and `strict`). When mode is not `strict`, also exit empty when the assistant text contains the legacy `<options-mode>no-question</options-mode>` substring; in `strict` that tag does **not** bypass.
+8. Resolve the effective mode via `getOptionsMode(session_id)`. Exit empty when the assistant text contains the `<options-mode>background-task</options-mode>` or `<options-mode>background-agent</options-mode>` substring (accepted in `on`, `strict`, and `auto`). When mode is `auto`, also exit empty when the text contains `<options-mode>task-complete</options-mode>` (`OPTIONS_TASK_COMPLETE_TAG`). When mode is not `strict` and not `auto`, also exit empty when the assistant text contains the `<options-mode>no-question</options-mode>` substring; in `strict` and `auto` that tag does **not** bypass.
 9. Increment the loop counter for the `(transcript_path, last-assistant-id)` pair; on the sixth consecutive miss, log a WARN, unlink the counter, and fail open.
-10. Emit `{"decision":"block","reason":<BLOCK_REASON|BLOCK_REASON_STRICT>}` — `BLOCK_REASON_STRICT` is selected when mode is `strict` and instructs the model to use `AskUserQuestion` or one of the two background tags; `BLOCK_REASON` is the on-mode default and instructs the model to add the `no-question` tag or use `AskUserQuestion`.
+10. Emit `{"decision":"block","reason":<BLOCK_REASON|BLOCK_REASON_STRICT|BLOCK_REASON_AUTO>}` — `BLOCK_REASON_STRICT` is selected when mode is `strict`; `BLOCK_REASON_AUTO` (inline ternary in stop.js) is selected when mode is `auto` and instructs the model to use `AskUserQuestion` or `OPTIONS_TASK_COMPLETE_TAG` or a background tag; `BLOCK_REASON` is the on-mode default and instructs the model to add the `no-question` tag or use `AskUserQuestion`.
 
 Transcript parsing walks valid JSONL envelopes from the end, chooses the last real Claude Code assistant envelope (`type: "assistant"` with `message.content`) first, then falls back to the legacy fixture shape (`role: "assistant"` with `content`). It accepts string content or array-of-blocks content, concatenates text blocks with newlines, detects `AskUserQuestion` `tool_use` blocks, and ignores malformed JSONL lines individually.
 
@@ -285,11 +315,12 @@ Transcript parsing walks valid JSONL envelopes from the end, chooses the last re
 
 Three tag categories are recognized in v0.15.0+, all using the same per-surface form (bare XML on Claude Code, CommonMark reference-link on Copilot):
 
-| Category | Claude Code (`hooks/config.js`) | Copilot CLI (`hooks/copilot-config.js`) | Valid in `on` | Valid in `strict` |
-| --- | --- | --- | --- | --- |
-| no-question | `<options-mode>no-question</options-mode>` (`OPTIONS_NO_QUESTION_TAG`) | `[//]: # (options-mode-no-question)` (`OPTIONS_NO_QUESTION_TAG`, since v0.14.0) | yes | **no** |
-| background-task | `<options-mode>background-task</options-mode>` (`OPTIONS_BACKGROUND_TASK_TAG`, v0.15.0+) | `[//]: # (options-mode-background-task)` (`OPTIONS_BACKGROUND_TASK_TAG`, v0.15.0+) | yes (silently treated as a tag) | yes |
-| background-agent | `<options-mode>background-agent</options-mode>` (`OPTIONS_BACKGROUND_AGENT_TAG`, v0.15.0+) | `[//]: # (options-mode-background-agent)` (`OPTIONS_BACKGROUND_AGENT_TAG`, v0.15.0+) | yes (silently treated as a tag) | yes |
+| Category | Claude Code (`hooks/config.js`) | Copilot CLI (`hooks/copilot-config.js`) | Valid in `on` | Valid in `strict` | Valid in `auto` |
+| --- | --- | --- | --- | --- | --- |
+| no-question | `<options-mode>no-question</options-mode>` (`OPTIONS_NO_QUESTION_TAG`) | `[//]: # (options-mode-no-question)` (`OPTIONS_NO_QUESTION_TAG`, since v0.14.0) | yes | **no** | **no** |
+| background-task | `<options-mode>background-task</options-mode>` (`OPTIONS_BACKGROUND_TASK_TAG`, v0.15.0+) | `[//]: # (options-mode-background-task)` (`OPTIONS_BACKGROUND_TASK_TAG`, v0.15.0+) | yes (silently treated as a tag) | yes | yes |
+| background-agent | `<options-mode>background-agent</options-mode>` (`OPTIONS_BACKGROUND_AGENT_TAG`, v0.15.0+) | `[//]: # (options-mode-background-agent)` (`OPTIONS_BACKGROUND_AGENT_TAG`, v0.15.0+) | yes (silently treated as a tag) | yes | yes |
+| task-complete | `<options-mode>task-complete</options-mode>` (`OPTIONS_TASK_COMPLETE_TAG`, v0.16.0+) | `[//]: # (options-mode-task-complete)` (`OPTIONS_TASK_COMPLETE_TAG` in `copilot-config.js`, v0.16.0+) | **no** | **no** | yes |
 
 Matching is a case-sensitive substring check against the last assistant text on each surface; the tag can appear at the start, middle, or end, but the rules text on each surface instructs models to append it as the final line for readability. The Copilot forms must each be on their own line at block level for CommonMark to parse them as link-reference definitions.
 

@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const VALID_MODES = ['on', 'off', 'strict'];
+const VALID_MODES = ['on', 'off', 'strict', 'auto'];
 const MAX_FLAG_BYTES = 64;
 const MAX_LOG_BYTES = 64 * 1024;
 const FLAG_NAME = '.options-mode-active';
@@ -24,6 +24,7 @@ const LOG_NAME = 'options-mode.log';
 const OPTIONS_NO_QUESTION_TAG = '[//]: # (options-mode-no-question)';
 const OPTIONS_BACKGROUND_TASK_TAG = '[//]: # (options-mode-background-task)';
 const OPTIONS_BACKGROUND_AGENT_TAG = '[//]: # (options-mode-background-agent)';
+const OPTIONS_TASK_COMPLETE_TAG = '[//]: # (options-mode-task-complete)';
 
 const OPTIONS_RULES_FOR_COPILOT = [
   'OPTIONS MODE ACTIVE.',
@@ -33,7 +34,7 @@ const OPTIONS_RULES_FOR_COPILOT = [
   '  - question: the actual question.',
   '  - choices: 2-4 short, mutually exclusive labels the user can reasonably pick from.',
   '  - allow_freeform: false unless the available choices may not cover the user intent.',
-  'Prefix the strongest choice with "Recommended: " when one option is clearly best, so it sits first in the list.',
+  'Always put the recommended or default option first (as Option 1). Label it "Recommended" to make the best choice obvious.',
   `When you are not asking the user for input and are returning plain prose, append ${OPTIONS_NO_QUESTION_TAG} as the final line of your response. This tag asserts the turn is not a question and should not be converted into an ask_user prompt.`,
   `Do NOT append ${OPTIONS_NO_QUESTION_TAG} when your turn ends with a question to the user (last sentence ending with "?", or imperative asks like "Want me to...", "Should I...", "Let me know..."). Call ask_user with concrete choices instead.`,
   'If options mode is off, do not enforce ask_user choice prompts.',
@@ -50,13 +51,29 @@ const OPTIONS_RULES_FOR_COPILOT_STRICT = [
   '  - question: the actual question.',
   '  - choices: REQUIRED, 2-4 short, mutually exclusive labels. ALWAYS populate this — never call ask_user without choices, even for an opening turn with no prior context. For an opening turn, provide 2-4 broad category labels (for example: Bug fix, New feature, Refactor, Explain code, Other).',
   '  - allow_freeform: true is permitted, AS LONG AS choices is also populated with 2-4 concrete labels. The strict-mode contract is that the user always has concrete labels to pick from; whether they can also type freeform alongside is allowed. Never call ask_user with allow_freeform: true and no choices — that is the freeform-only failure that strict mode forbids.',
-  'Prefix the strongest choice with "Recommended: " when one option is clearly best, so it sits first in the list.',
+  'Always put the recommended or default option first (as Option 1). Label it "Recommended" to make the best choice obvious.',
   `When you are polling a background task (build, test run, long-running command) and waiting for it to finish, append ${OPTIONS_BACKGROUND_TASK_TAG} as the final line of your response. This tag asserts the turn is a status update on a background task, not a question.`,
   `When you are polling a background agent (subagent, peer agent, orchestrator) and waiting for it to report back, append ${OPTIONS_BACKGROUND_AGENT_TAG} as the final line of your response. This tag asserts the turn is a status update on a background agent, not a question.`,
   `The non-strict ${OPTIONS_NO_QUESTION_TAG} tag is NOT a valid bypass in strict mode. There is no plain-prose escape hatch: every turn must be either an ask_user call (choices populated; allow_freeform either) or one of the two background tags above.`,
   'If options mode is off, do not enforce ask_user choice prompts.',
   '',
   `Canonical anchors: OPTIONS MODE ACTIVE; strict; ask_user; choices REQUIRED; Recommended; ${OPTIONS_BACKGROUND_TASK_TAG}; ${OPTIONS_BACKGROUND_AGENT_TAG}.`
+].join('\n');
+
+const OPTIONS_RULES_FOR_COPILOT_AUTO = [
+  'OPTIONS MODE ACTIVE (auto).',
+  '',
+  'The user may not be present to respond. Every turn MUST end with one of four states:',
+  '1. An ask_user tool call — the auto-mode hook will reply "The user isn\'t here right now, please try to continue as much as possible." Use this for decisions; proceed autonomously using your best judgment after receiving that response.',
+  `2. ${OPTIONS_TASK_COMPLETE_TAG} — append this when the task is genuinely finished and there is nothing more to do. Do NOT use ask_user for post-task suggestions; use this tag and stop.`,
+  `3. ${OPTIONS_BACKGROUND_TASK_TAG} — when polling a background task (build, test run, long-running command).`,
+  `4. ${OPTIONS_BACKGROUND_AGENT_TAG} — when polling a background agent (subagent, peer agent, orchestrator).`,
+  '',
+  `Plain prose without one of those four is forbidden in auto mode. The no-question tag is NOT valid in auto mode.`,
+  'When you use ask_user, always put the recommended or default option first (as Option 1). Label it "Recommended". Offer 2-4 concrete, mutually exclusive choices.',
+  'If options mode is off, do not enforce choice prompts.',
+  '',
+  `Canonical anchors: OPTIONS MODE ACTIVE; auto; ask_user; choices; Recommended; ${OPTIONS_TASK_COMPLETE_TAG}; ${OPTIONS_BACKGROUND_TASK_TAG}.`
 ].join('\n');
 
 function getConfigRoot() {
@@ -124,7 +141,7 @@ function getOptionsMode() {
 
 function isOptionsActive() {
   const mode = getOptionsMode();
-  return mode === 'on' || mode === 'strict';
+  return mode === 'on' || mode === 'strict' || mode === 'auto';
 }
 
 function safeWriteFlag(content) {
@@ -196,8 +213,10 @@ module.exports = {
   OPTIONS_NO_QUESTION_TAG,
   OPTIONS_BACKGROUND_TASK_TAG,
   OPTIONS_BACKGROUND_AGENT_TAG,
+  OPTIONS_TASK_COMPLETE_TAG,
   OPTIONS_RULES_FOR_COPILOT,
   OPTIONS_RULES_FOR_COPILOT_STRICT,
+  OPTIONS_RULES_FOR_COPILOT_AUTO,
   VALID_MODES,
   FLAG_NAME,
   getConfigRoot,

@@ -25,6 +25,7 @@ const {
   OPTIONS_NO_QUESTION_TAG,
   OPTIONS_BACKGROUND_TASK_TAG,
   OPTIONS_BACKGROUND_AGENT_TAG,
+  OPTIONS_TASK_COMPLETE_TAG,
   getOptionsMode,
   readStdinJson,
   appendLog,
@@ -115,7 +116,7 @@ function emitBlock(reason) {
 
   let mode = 'on';
   try { mode = getOptionsMode(); } catch (e) {}
-  if (mode !== 'on' && mode !== 'strict') emitPass();
+  if (mode !== 'on' && mode !== 'strict' && mode !== 'auto') emitPass();
 
   const transcriptPath = stdin && (stdin.transcriptPath || stdin.transcript_path);
   if (!transcriptPath || !fs.existsSync(transcriptPath)) {
@@ -136,7 +137,9 @@ function emitBlock(reason) {
     emitPass();
   }
 
-  const reason = mode === 'strict' ? BLOCK_REASON_STRICT : BLOCK_REASON;
+  const reason = mode === 'strict' ? BLOCK_REASON_STRICT
+    : mode === 'auto' ? `Auto options mode: call ask_user for decisions (hook auto-responds), or append ${OPTIONS_TASK_COMPLETE_TAG} when done, or use a background tag when polling.`
+    : BLOCK_REASON;
 
   if (content.indexOf(OPTIONS_BACKGROUND_TASK_TAG) !== -1) {
     appendLog(`INFO agentStop pass background-task-tag-found mode=${mode}`);
@@ -146,7 +149,11 @@ function emitBlock(reason) {
     appendLog(`INFO agentStop pass background-agent-tag-found mode=${mode}`);
     emitPass();
   }
-  if (mode !== 'strict' && content.indexOf(OPTIONS_NO_QUESTION_TAG) !== -1) {
+  if (mode === 'auto' && content.indexOf(OPTIONS_TASK_COMPLETE_TAG) !== -1) {
+    appendLog(`INFO agentStop pass task-complete-tag-found mode=${mode}`);
+    emitPass();
+  }
+  if (mode !== 'strict' && mode !== 'auto' && content.indexOf(OPTIONS_NO_QUESTION_TAG) !== -1) {
     appendLog('INFO agentStop pass no-question-tag-found');
     emitPass();
   }

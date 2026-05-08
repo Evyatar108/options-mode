@@ -3,6 +3,7 @@
 const {
   OPTIONS_RULES_FOR_COPILOT,
   OPTIONS_RULES_FOR_COPILOT_STRICT,
+  OPTIONS_RULES_FOR_COPILOT_AUTO,
   getOptionsMode,
   readStdinJson,
   appendLog
@@ -16,12 +17,14 @@ const {
   appendLog(`DEBUG sessionStart stdin raw=${JSON.stringify(stdin)}`);
 
   const mode = getOptionsMode();
-  if (mode !== 'on' && mode !== 'strict') {
+  if (mode !== 'on' && mode !== 'strict' && mode !== 'auto') {
     process.stdout.write('{}');
     process.exit(0);
   }
 
-  const rules = mode === 'strict' ? OPTIONS_RULES_FOR_COPILOT_STRICT : OPTIONS_RULES_FOR_COPILOT;
+  const rules = mode === 'strict' ? OPTIONS_RULES_FOR_COPILOT_STRICT
+    : mode === 'auto' ? OPTIONS_RULES_FOR_COPILOT_AUTO
+    : OPTIONS_RULES_FOR_COPILOT;
   const out = { additionalContext: rules };
   process.stdout.write(JSON.stringify(out));
   appendLog(`INFO sessionStart injected rules mode=${mode} len=${rules.length}`);

@@ -11,7 +11,8 @@ const {
   getOptionsMode,
   OPTIONS_NO_QUESTION_TAG,
   OPTIONS_BACKGROUND_TASK_TAG,
-  OPTIONS_BACKGROUND_AGENT_TAG
+  OPTIONS_BACKGROUND_AGENT_TAG,
+  OPTIONS_TASK_COMPLETE_TAG
 } = require('./config');
 
 const BLOCK_REASON = `Add ${OPTIONS_NO_QUESTION_TAG} tag if this turn is not asking the user, or use AskUserQuestion with concrete choices.`;
@@ -135,11 +136,14 @@ async function main() {
 
   let mode = 'on';
   try { mode = getOptionsMode(input.session_id); } catch (e) {}
-  const reason = mode === 'strict' ? BLOCK_REASON_STRICT : BLOCK_REASON;
+  const reason = mode === 'strict' ? BLOCK_REASON_STRICT
+    : mode === 'auto' ? `Auto options mode: use AskUserQuestion for decisions (hook auto-responds), or append ${OPTIONS_TASK_COMPLETE_TAG} when done, or use a background tag when polling.`
+    : BLOCK_REASON;
 
   if (normalized.text.includes(OPTIONS_BACKGROUND_TASK_TAG)) return;
   if (normalized.text.includes(OPTIONS_BACKGROUND_AGENT_TAG)) return;
-  if (mode !== 'strict' && normalized.text.includes(OPTIONS_NO_QUESTION_TAG)) return;
+  if (mode === 'auto' && normalized.text.includes(OPTIONS_TASK_COMPLETE_TAG)) return;
+  if (mode !== 'strict' && mode !== 'auto' && normalized.text.includes(OPTIONS_NO_QUESTION_TAG)) return;
 
   const key = assistantKey(lastAssistant, normalized.text);
   const count = incrementLoopCounter(input.transcript_path, key);
