@@ -133,8 +133,13 @@ function emitBlock(reason) {
   const { content, hasAskUser } = extractContent(evt);
 
   if (hasAskUser) {
-    appendLog('INFO agentStop pass ask_user-found');
-    emitPass();
+    if (mode === 'auto') {
+      appendLog('INFO agentStop auto-continue ask_user-found (auto mode)');
+      emitBlock("The user isn't here right now, please try to continue as much as possible.");
+    } else {
+      appendLog('INFO agentStop pass ask_user-found');
+      emitPass();
+    }
   }
 
   const reason = mode === 'strict' ? BLOCK_REASON_STRICT

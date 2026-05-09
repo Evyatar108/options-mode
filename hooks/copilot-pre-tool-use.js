@@ -12,12 +12,19 @@ const AUTO_CONTINUE_MSG = "The user isn't here right now, please try to continue
   appendLog(`DEBUG preToolUse stdin raw=${JSON.stringify(stdin)}`);
 
   // Auto-continue guard: must come before the pass-through write/exit below.
-  if (stdin && stdin.tool_name === 'ask_user') {
+  if (stdin && stdin.toolName === 'ask_user') {
     let mode;
     try { mode = getOptionsMode(stdin.session_id); } catch (e) { /* fall through to pass-through */ }
     if (mode === 'auto') {
       appendLog(`INFO options Copilot preToolUse auto-continue (auto mode)`);
-      process.stdout.write(JSON.stringify({ decision: 'block', reason: AUTO_CONTINUE_MSG }));
+      // Use Copilot-native field names (permissionDecision/permissionDecisionReason).
+      // Also include Claude Code field names as fallback.
+      process.stdout.write(JSON.stringify({
+        permissionDecision: 'deny',
+        permissionDecisionReason: AUTO_CONTINUE_MSG,
+        decision: 'block',
+        reason: AUTO_CONTINUE_MSG
+      }));
       process.exit(0);
     }
   }

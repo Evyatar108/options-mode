@@ -28,17 +28,18 @@ Then run the matching shell command:
 After running, reply with **one line**:
 
 ```
-options mode (copilot): <on|off|strict>
+options mode (copilot): <on|off|strict|auto>
 ```
 
-Where `<on|off|strict>` is the resulting mode (or the read-back for status).
+Where `<on|off|strict|auto>` is the resulting mode (or the read-back for status).
 
-Then append on a new final line:
+Then append the appropriate sentinel on a new final line based on the **resulting** mode:
 
-```
-[//]: # (options-mode-no-question)
-```
+- `on` or `strict` → append `[//]: # (options-mode-no-question)` (this is a status turn, not a question)
+- `auto` → append `[//]: # (options-mode-task-complete)` (the toggle is complete; no-question is not valid in auto mode)
+- `off` → append `[//]: # (options-mode-no-question)`
+- `status` → append `[//]: # (options-mode-no-question)`
 
-This skill is a status/non-question turn, so the no-question tag is required when options-mode is currently `on`. The reference-link form is parsed by CommonMark renderers as a link reference definition (label `//`, target `#`, title `options-mode-no-question`) and is not emitted in the rendered output, so the user does not see the literal sentinel. It must be on its own line at block level.
+The reference-link forms are parsed by CommonMark renderers as link reference definitions and are not emitted in the rendered output. Each must be on its own line at block level.
 
 Note: enabling options-mode takes effect on the **next session**, when the SessionStart hook re-injects the rules text. To anchor it for the current session as well, restart the Copilot CLI session after toggling on.

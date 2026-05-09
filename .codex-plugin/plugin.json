@@ -1,6 +1,6 @@
 {
   "name": "options-mode",
-  "version": "0.16.0",
+  "version": "0.16.4",
   "description": "Options mode: choice-prompt enforcement hooks for Claude Code and repo-local Codex sessions",
   "author": {
     "name": "Evyatar Mitrani",
