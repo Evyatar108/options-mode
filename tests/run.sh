@@ -187,8 +187,20 @@ run_session_start() {
 }
 
 session_flag_name() {
+  # SESSION_FLAGS_SUBDIR and sessionFlagSuffix come from config.js — path structure
+  # lives in one place. Backslashes normalized for bash compatibility on Windows.
   local session_id="$1"
-  "$NODE_BIN" -e "process.stdout.write('.options-active-' + require('crypto').createHash('sha256').update(process.argv[1]).digest('hex').slice(0, 32))" "$session_id"
+  "$NODE_BIN" -e "
+const path = require('path');
+const { SESSION_FLAGS_SUBDIR, sessionFlagSuffix } = require('./plugins/options-mode/hooks/config');
+process.stdout.write(path.join(SESSION_FLAGS_SUBDIR, sessionFlagSuffix(process.argv[1])).replace(/\\\\/g, '/'));
+" "$session_id"
+}
+
+write_session_flag() {
+  local dir="$1" flag_name="$2" value="$3"
+  mkdir -p "$(dirname "$dir/$flag_name")"
+  printf '%s' "$value" > "$dir/$flag_name"
 }
 
 test_session_start_emits_rules_when_active() {
@@ -198,7 +210,7 @@ test_session_start_emits_rules_when_active() {
   for source in startup resume compact clear; do
     local dir out
     dir="$(mktemp -d)"
-    printf on > "$dir/$flag_name"
+    write_session_flag "$dir" "$flag_name" on
     out="$(run_session_start "$source" "$dir" "$sid")"
     [[ "$out" == *"OPTIONS MODE ACTIVE"* ]] || fail test_session_start_emits_rules_when_active "missing active anchor for $source"
     [[ "$out" == *"AskUserQuestion choice prompt"* ]] || fail test_session_start_emits_rules_when_active "missing AskUserQuestion anchor for $source"
@@ -225,7 +237,7 @@ test_session_start_preserves_off() {
   local flag_name
   flag_name="$(session_flag_name "$sid")"
   dir="$(mktemp -d)"
-  printf off > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" off
   run_session_start startup "$dir" "$sid" >/dev/null
   [[ "$(cat "$dir/$flag_name")" == "off" ]] || fail test_session_start_preserves_off "SessionStart overwrote off flag"
   pass test_session_start_preserves_off
@@ -237,8 +249,8 @@ test_per_session_isolation() {
   flag_on="$(session_flag_name "$sid_on")"
   flag_off="$(session_flag_name "$sid_off")"
   dir="$(mktemp -d)"
-  printf on > "$dir/$flag_on"
-  printf off > "$dir/$flag_off"
+  write_session_flag "$dir" "$flag_on" on
+  write_session_flag "$dir" "$flag_off" off
 
   out="$(run_session_start startup "$dir" "$sid_on")"
   [[ "$out" == *"OPTIONS MODE ACTIVE"* ]] || fail test_per_session_isolation "session-on did not emit rules"
@@ -362,13 +374,13 @@ test_statusline_bash() {
 
   # 1. Per-session flag = on -> [OPTIONS MODE]
   dir="$(mktemp -d)"
-  printf on > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" on
   out="$(run_statusline_bash "$dir" "{\"session_id\":\"$sid\"}")"
   [[ "$out" == *"[OPTIONS MODE]"* ]] || fail test_statusline_bash "per-session on did not render [OPTIONS MODE]"
 
   # 2. Per-session flag = off -> empty
   dir="$(mktemp -d)"
-  printf off > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" off
   out="$(run_statusline_bash "$dir" "{\"session_id\":\"$sid\"}")"
   [[ -z "$out" ]] || fail test_statusline_bash "per-session off rendered '$out', expected empty"
 
@@ -396,7 +408,7 @@ test_statusline_bash() {
 
   # 7. Per-session flag = auto -> [OPTIONS MODE: auto]
   dir="$(mktemp -d)"
-  printf auto > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" auto
   out="$(run_statusline_bash "$dir" "{\"session_id\":\"$sid\"}")"
   [[ "$out" == *"[OPTIONS MODE: auto]"* ]] || fail test_statusline_bash "per-session auto did not render [OPTIONS MODE: auto]: '$out'"
 
@@ -415,13 +427,13 @@ test_statusline_powershell() {
 
   # 1. Per-session flag = on -> [OPTIONS MODE]
   dir="$(mktemp -d)"
-  printf on > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" on
   out="$(run_statusline_pwsh "$ps_bin" "$dir" "{\"session_id\":\"$sid\"}")"
   [[ "$out" == *"[OPTIONS MODE]"* ]] || fail test_statusline_powershell "per-session on did not render [OPTIONS MODE]"
 
   # 2. Per-session flag = off -> empty
   dir="$(mktemp -d)"
-  printf off > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" off
   out="$(run_statusline_pwsh "$ps_bin" "$dir" "{\"session_id\":\"$sid\"}")"
   [[ -z "$out" ]] || fail test_statusline_powershell "per-session off rendered '$out', expected empty"
 
@@ -449,7 +461,7 @@ test_statusline_powershell() {
 
   # 7. Per-session flag = auto -> [OPTIONS MODE: auto]
   dir="$(mktemp -d)"
-  printf auto > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" auto
   out="$(run_statusline_pwsh "$ps_bin" "$dir" "{\"session_id\":\"$sid\"}")"
   [[ "$out" == *"[OPTIONS MODE: auto]"* ]] || fail test_statusline_powershell "per-session auto did not render [OPTIONS MODE: auto]: '$out'"
 
@@ -612,7 +624,7 @@ test_offline_smoke_cases() {
   smoke_flag="$(session_flag_name "sess-smoke")"
 
   dir="$(mktemp -d)"
-  printf on > "$dir/$smoke_flag"
+  write_session_flag "$dir" "$smoke_flag" on
   set +e
   out="$(run_stop_stdin_file "$dir" stop-smoke-tagless.json "$PLUGIN_ROOT/tests/fixtures/transcripts/last-msg-status-without-tag.jsonl")"
   status=$?
@@ -621,7 +633,7 @@ test_offline_smoke_cases() {
   assert_stop_block test_offline_smoke_case_a_tagless_blocks "$out"
 
   dir="$(mktemp -d)"
-  printf on > "$dir/$smoke_flag"
+  write_session_flag "$dir" "$smoke_flag" on
   set +e
   out="$(run_stop_stdin_file "$dir" stop-smoke-tagged.json "$PLUGIN_ROOT/tests/fixtures/transcripts/last-msg-with-tag.jsonl")"
   status=$?
@@ -630,7 +642,7 @@ test_offline_smoke_cases() {
   assert_empty_output test_offline_smoke_case_b_tagged_silent "$out"
 
   dir="$(mktemp -d)"
-  printf on > "$dir/$smoke_flag"
+  write_session_flag "$dir" "$smoke_flag" on
   set +e
   out="$(run_stop_stdin_file "$dir" stop-smoke-askuserquestion.json "$PLUGIN_ROOT/tests/fixtures/transcripts/last-msg-real-askuserquestion.jsonl")"
   status=$?
@@ -645,7 +657,7 @@ test_ralph_polling_with_tag_skip() {
   local dir out status smoke_flag
   smoke_flag="$(session_flag_name "sess-smoke")"
   dir="$(mktemp -d)"
-  printf on > "$dir/$smoke_flag"
+  write_session_flag "$dir" "$smoke_flag" on
   set +e
   out="$(run_stop_stdin_file "$dir" stop-smoke-tagged.json "$PLUGIN_ROOT/tests/fixtures/transcripts/last-msg-ralph-polling-with-tag.jsonl")"
   status=$?
@@ -987,7 +999,7 @@ test_get_options_mode_returns_strict() {
   local flag_name
   flag_name="$(session_flag_name "$sid")"
   dir="$(mktemp -d)"
-  printf strict > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" strict
   CLAUDE_CONFIG_DIR="$dir" SID="$sid" node <<'NODE'
 const { getOptionsMode, isOptionsActive } = require('./plugins/options-mode/hooks/config');
 if (getOptionsMode(process.env.SID) !== 'strict') throw new Error(`expected strict, got ${getOptionsMode(process.env.SID)}`);
@@ -1217,7 +1229,7 @@ test_statusline_bash_strict() {
 
   # 1. Per-session flag = strict -> [OPTIONS MODE: strict]
   dir="$(mktemp -d)"
-  printf strict > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" strict
   out="$(run_statusline_bash "$dir" "{\"session_id\":\"$sid\"}")"
   [[ "$out" == *"[OPTIONS MODE: strict]"* ]] || fail test_statusline_bash_strict "per-session strict did not render: '$out'"
 
@@ -1246,7 +1258,7 @@ test_statusline_powershell_strict() {
   flag_name="$(session_flag_name "$sid")"
 
   dir="$(mktemp -d)"
-  printf strict > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" strict
   out="$(run_statusline_pwsh "$ps_bin" "$dir" "{\"session_id\":\"$sid\"}")"
   [[ "$out" == *"[OPTIONS MODE: strict]"* ]] || fail test_statusline_powershell_strict "per-session strict did not render: '$out'"
 
@@ -1267,7 +1279,7 @@ test_session_start_strict_emits_strict_rules() {
   local flag_name
   flag_name="$(session_flag_name "$sid")"
   dir="$(mktemp -d)"
-  printf strict > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" strict
   out="$(run_session_start startup "$dir" "$sid")"
   [[ "$out" == *"<options-mode>background-task</options-mode>"* ]] || fail test_session_start_strict_emits_strict_rules "missing background-task anchor"
   [[ "$out" == *"<options-mode>background-agent</options-mode>"* ]] || fail test_session_start_strict_emits_strict_rules "missing background-agent anchor"
@@ -1322,7 +1334,7 @@ test_auto_mode_pre_tool_use_intercepts_ask_user_question() {
   local flag_name
   flag_name="$(session_flag_name "$sid")"
   dir="$(mktemp -d)"
-  printf auto > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" auto
   out="$(echo '{"tool_name":"AskUserQuestion","session_id":"'"$sid"'"}' | CLAUDE_CONFIG_DIR="$dir" HOME="$dir/home" "$NODE_BIN" "$PLUGIN_ROOT/hooks/pre-tool-use.js")"
   OUT="$out" node <<'NODE'
 const out = JSON.parse(process.env.OUT);
@@ -1337,7 +1349,7 @@ test_auto_mode_pre_tool_use_skips_other_tools() {
   local flag_name
   flag_name="$(session_flag_name "$sid")"
   dir="$(mktemp -d)"
-  printf auto > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" auto
   out="$(echo '{"tool_name":"Bash","session_id":"'"$sid"'"}' | CLAUDE_CONFIG_DIR="$dir" HOME="$dir/home" "$NODE_BIN" "$PLUGIN_ROOT/hooks/pre-tool-use.js")"
   [[ -z "$out" ]] || fail test_auto_mode_pre_tool_use_skips_other_tools "expected empty, got: $out"
   pass test_auto_mode_pre_tool_use_skips_other_tools
@@ -1348,7 +1360,7 @@ test_auto_mode_pre_tool_use_skips_non_auto_mode() {
   local flag_name
   flag_name="$(session_flag_name "$sid")"
   dir="$(mktemp -d)"
-  printf on > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" on
   out="$(echo '{"tool_name":"AskUserQuestion","session_id":"'"$sid"'"}' | CLAUDE_CONFIG_DIR="$dir" HOME="$dir/home" "$NODE_BIN" "$PLUGIN_ROOT/hooks/pre-tool-use.js")"
   [[ -z "$out" ]] || fail test_auto_mode_pre_tool_use_skips_non_auto_mode "expected empty, got: $out"
   pass test_auto_mode_pre_tool_use_skips_non_auto_mode
@@ -1394,7 +1406,7 @@ test_session_start_auto_emits_auto_rules() {
   local flag_name
   flag_name="$(session_flag_name "$sid")"
   dir="$(mktemp -d)"
-  printf auto > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" auto
   out="$(run_session_start startup "$dir" "$sid")"
   [[ "$out" == *"OPTIONS MODE ACTIVE (auto)"* ]] || fail test_session_start_auto_emits_auto_rules "missing auto anchor"
   [[ "$out" == *"task-complete"* ]] || fail test_session_start_auto_emits_auto_rules "missing task-complete anchor"
@@ -1427,7 +1439,7 @@ test_get_options_mode_returns_auto() {
   local flag_name
   flag_name="$(session_flag_name "$sid")"
   dir="$(mktemp -d)"
-  printf auto > "$dir/$flag_name"
+  write_session_flag "$dir" "$flag_name" auto
   CLAUDE_CONFIG_DIR="$dir" SID="$sid" node <<'NODE'
 const { getOptionsMode, isOptionsActive } = require('./plugins/options-mode/hooks/config');
 if (getOptionsMode(process.env.SID) !== 'auto') throw new Error(`expected auto, got ${getOptionsMode(process.env.SID)}`);

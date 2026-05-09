@@ -96,7 +96,7 @@ if [ -n "$SESSION_ID" ]; then
   HEX=$(sha256_hex "$SESSION_ID" || true)
   if [ -n "$HEX" ]; then
     SUFFIX=${HEX:0:32}
-    SESSION_FLAG="$CLAUDE_DIR/.options-active-$SUFFIX"
+    SESSION_FLAG="$CLAUDE_DIR/options-mode/sessions-configs/$SUFFIX"
     MODE=$(read_flag_file "$SESSION_FLAG" || true)
   fi
 else

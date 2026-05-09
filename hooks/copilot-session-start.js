@@ -16,7 +16,7 @@ const {
   appendLog(`DEBUG sessionStart stdin keys=${keys} bytes=${rawSize}`);
   appendLog(`DEBUG sessionStart stdin raw=${JSON.stringify(stdin)}`);
 
-  const mode = getOptionsMode();
+  const mode = getOptionsMode(stdin && stdin.sessionId);
   if (mode !== 'on' && mode !== 'strict' && mode !== 'auto') {
     process.stdout.write('{}');
     process.exit(0);

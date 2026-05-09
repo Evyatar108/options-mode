@@ -2,6 +2,18 @@
 
 Options Mode is a hook-only plugin. Runtime code is CommonJS under `hooks/`; tests live in `tests/run.sh` and must stay offline/deterministic by using isolated `CLAUDE_CONFIG_DIR`, `COPILOT_CONFIG_DIR`, and `HOME` roots.
 
+## v0.16.5–v0.16.10 Migration Notes
+
+**v0.16.5 — Copilot per-session flags.** Copilot was machine-wide since v0.10.0. `copilot-config.js` now mirrors Claude Code's per-session design: per-session flag at `~/.copilot/options-mode/sessions-configs/<sha256(sessionId)[0:32]>`, machine-wide `~/.copilot/.options-mode-active` stays as fallback default. `getOptionsMode(sessionId)` checks per-session first. All enforcement hooks (`agentStop`, `sessionStart`, `preToolUse`) pass `sessionId` through. Toggle path: `preToolUse` intercepts marker commands from SKILL.md (see v0.16.9).
+
+**v0.16.7 — Copilot session flags in `options-mode/` dir** (originally `~/.copilot/options-mode/<hash>`, then nested in v0.16.8).
+
+**v0.16.8 — Claude Code session flags in dedicated dir.** Moved from `~/.claude/.options-active-<hash>` to `~/.claude/options-mode/sessions-configs/<hash>`. `SESSION_FLAGS_SUBDIR = path.join('options-mode', 'sessions-configs')` exported from `config.js` (and mirrored in `copilot-config.js`) — single source of truth for the path structure. Test helper `session_flag_name()` drives off `SESSION_FLAGS_SUBDIR` + `sessionFlagSuffix` from `config.js`; `write_session_flag()` uses `dirname` to auto-adapt. Statusline scripts updated to match.
+
+**v0.16.9 — Copilot SKILL.md marker commands.** SKILL.md now instructs the model to run `Write-Output 'options-mode-set:<mode>'` instead of writing to `.options-mode-active` directly. `preToolUse` detects the marker, writes the per-session flag, returns `{}` (allow) — command exits 0 with no "Denied" UX, no retry loop. Status uses `Write-Output 'options-mode-status'`.
+
+**v0.16.10 — Status uses `additionalContext`.** Status marker returns `{ additionalContext: "options mode (copilot): <mode>" }` instead of `permissionDecision: deny`. Both set and status now return allow (`{}`); status injects the mode via context. Claude Code's toggle is unchanged — `UserPromptSubmit` hook intercepts `/options-mode` directly, never involves the model or shell commands.
+
 ## v0.16.0 Migration Note
 
 Two UX improvements:
@@ -16,9 +28,9 @@ Two UX improvements:
 4. `no-question` tag — **NOT valid** in auto mode (strict-based, no prose escape).
 
 New files/changes:
-- `hooks/pre-tool-use.js` — new PreToolUse hook (Claude Code); intercepts `AskUserQuestion` in auto mode.
+- `hooks/pre-tool-use.js` — new PreToolUse hook (Claude Code); intercepts `AskUserQuestion` in auto mode with `decision: block`. Honored by Claude Code; NOT honored by Copilot CLI for built-in tools (see v0.16.4).
 - `hooks/hooks.json` — new `PreToolUse` entry, matcher `AskUserQuestion`, command `node ${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use.js`.
-- `hooks/copilot-pre-tool-use.js` — rewritten from probe stub; adds auto-continue before pass-through `{}`.
+- `hooks/copilot-pre-tool-use.js` — probe stub extended to: (a) intercept SKILL.md marker commands (`options-mode-set:<mode>`, `options-mode-status`) for per-session toggle; (b) intercept `ask_user` in auto mode using `permissionDecision: deny` + `permissionDecisionReason` (Copilot-native deny format, confirmed working in v0.16.4). For auto mode, `agentStop` also blocks `ask_user` as a secondary guard since Copilot does not honor preToolUse deny for built-in tools before the dialog renders (confirmed v0.16.2 empirically).
 - `hooks/config.js` — `'auto'` added to `VALID_MODES`; `OPTIONS_TASK_COMPLETE_TAG`; `OPTIONS_RULES_TEXT_AUTO`; `isOptionsActive()` includes `auto`.
 - `hooks/copilot-config.js` — same for Copilot surface; `OPTIONS_TASK_COMPLETE_TAG = '[//]: # (options-mode-task-complete)'`; `OPTIONS_RULES_FOR_COPILOT_AUTO`.
 - `hooks/stop.js` — no-question guard extended to exclude `auto`; task-complete tag added; `BLOCK_REASON_AUTO` inline.
@@ -202,7 +214,7 @@ The badge rename is cosmetic: `hooks/options-mode-statusline.{sh,ps1}` and `test
 
 ## v0.8.0 Migration Note
 
-Options Mode v0.8.0 makes the statusline session-aware, global-default-aware, and silent-when-off. The scripts at `hooks/options-mode-statusline.{sh,ps1}` now read `session_id` from stdin JSON (Claude Code passes `{session_id, model, workspace, transcript_path, ...}` to statusLine commands), compute the per-session flag at `<configRoot>/.options-active-<sha256(session_id)[0:32]>`, and fall back to `<configRoot>/options.json` `defaultMode` (with `OPTIONS_DEFAULT_MODE` env taking precedence over the file). Effective-mode logic mirrors `hooks/config.js::isOptionsActive()` exactly.
+Options Mode v0.8.0 makes the statusline session-aware, global-default-aware, and silent-when-off. The scripts at `hooks/options-mode-statusline.{sh,ps1}` now read `session_id` from stdin JSON (Claude Code passes `{session_id, model, workspace, transcript_path, ...}` to statusLine commands), compute the per-session flag at `<configRoot>/options-mode/sessions-configs/<sha256(session_id)[0:32]>` (path updated in v0.16.8; was `<configRoot>/.options-active-<sha256(session_id)[0:32]>` in v0.4.0–v0.16.7), and fall back to `<configRoot>/options.json` `defaultMode` (with `OPTIONS_DEFAULT_MODE` env taking precedence over the file). Effective-mode logic mirrors `hooks/config.js::isOptionsActive()` exactly.
 
 The legacy single-file path `<configRoot>/.options-active` is consulted only as a back-compat fallback when stdin lacks `session_id` — same boundary as `getFlagPath()` in `hooks/config.js`. The `[OPTIONS:OFF]` rendering is deliberately removed: the badge appears only when the effective mode is `on`, matching the caveman pattern. Bump from `0.7.0` to `0.8.0` covers both `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, plus the three marketplace indexes.
 
@@ -232,7 +244,7 @@ The auto-mode rules-text constants — `hooks/config.js::OPTIONS_RULES_TEXT_AUTO
 
 ## Flag Contract
 
-As of v0.4.0 the mode flag is **per session**: `<configRoot>/.options-active-<sha256(session_id)[0:32]>`, containing literal `on` or `off`. The legacy single-machine path `<configRoot>/.options-active` is retained as the back-compat fallback when a hook receives no `session_id` (for older Claude Code builds and for repo-level harness scripts that do not propagate the session id). The default mode is `off` (was `on` through v0.3.0): a session with no flag file falls back to the global default (see Global Default below) and is inactive when that resolves to `off`. `/options-mode on` writes the per-session flag, so each session opts in independently. Read failure semantics differ from missing semantics: `_readFlagInternal()` distinguishes ENOENT (returns `null`, defers to `getDefaultMode()`) from real read errors (rethrown so `isOptionsActive()` fails open to active). The legacy intentional-divergence-from-caveman naming (`.options-*` temp-file prefixes, options-mode-specific error text) is unchanged.
+As of v0.4.0 the mode flag is **per session**: `<configRoot>/options-mode/sessions-configs/<sha256(session_id)[0:32]>` (moved to a dedicated directory in v0.16.8; was `<configRoot>/.options-active-<sha256(session_id)[0:32]>` in v0.4.0–v0.16.7). The path segment is `SESSION_FLAGS_SUBDIR = path.join('options-mode', 'sessions-configs')` — one constant in `config.js` owns the structure; the test helper `session_flag_name()` and `write_session_flag()` drive off it. The legacy single-machine path `<configRoot>/.options-active` is retained as the back-compat fallback when a hook receives no `session_id` (for older Claude Code builds and for repo-level harness scripts that do not propagate the session id). The default mode is `off` (was `on` through v0.3.0): a session with no flag file falls back to the global default (see Global Default below) and is inactive when that resolves to `off`. `/options-mode on` writes the per-session flag, so each session opts in independently. Read failure semantics differ from missing semantics: `_readFlagInternal()` distinguishes ENOENT (returns `null`, defers to `getDefaultMode()`) from real read errors (rethrown so `isOptionsActive()` fails open to active). The legacy intentional-divergence-from-caveman naming (`.options-*` temp-file prefixes, options-mode-specific error text) is unchanged.
 
 `safeWriteFlag()` performs a `lstatSync` symlink check on the destination, then writes a temp file with `O_EXCL | O_NOFOLLOW` and `renameSync`s it into place. There is a TOCTOU window between the symlink check and the rename: `renameSync` does not carry `O_NOFOLLOW` semantics on the destination, so a concurrent attacker with write access to `flagDir` could replace `flagPath` with a symlink between the two syscalls. This is accepted as out-of-threat-model — `flagDir` is `~/.claude` (or a user-controlled `CLAUDE_CONFIG_DIR`), and a local attacker with write access to that directory already has full control of Claude Code's config. The acceptance is cross-referenced from the in-code comment in `hooks/config.js::safeWriteFlag()`. Rename failures with `EEXIST`/`EBUSY`/`EACCES` are logged via `appendLog` to `<configRoot>/options.log` so race attempts are observable.
 
@@ -277,7 +289,7 @@ If `options.json` is corrupt, `setDefaultMode()` overwrites it with a valid JSON
 Decision flow:
 
 1. Parse stdin as JSON and extract `session_id` (PowerShell uses `ConvertFrom-Json`; bash prefers `jq` and falls back to a `grep -Eo` extractor since `jq` is not guaranteed on Git Bash).
-2. If `session_id` is present, compute `<configRoot>/.options-active-<sha256(session_id)[0:32]>` and read it via the same safety guards as the hooks (refuse symlinks/reparse points, cap at 64 bytes, lowercase + `[a-z0-9-]` whitelist, accept only `on`/`off`).
+2. If `session_id` is present, compute `<configRoot>/options-mode/sessions-configs/<sha256(session_id)[0:32]>` (same `SESSION_FLAGS_SUBDIR` as the hooks) and read it via the same safety guards (refuse symlinks/reparse points, cap at 64 bytes, lowercase + `[a-z0-9-]` whitelist, accept only valid modes).
 3. If `session_id` is absent, fall back to the legacy `<configRoot>/.options-active` path — same back-compat boundary as `getFlagPath()`.
 4. If neither flag yields a valid mode, defer to `getDefaultMode()` precedence: `OPTIONS_DEFAULT_MODE` env var → `<configRoot>/options.json::defaultMode` → unset.
 5. Render `[OPTIONS MODE]` in ANSI 172 (orange) when the effective mode resolves to `on`; render `[OPTIONS MODE: strict]` for `strict`; render `[OPTIONS MODE: auto]` for `auto`; exit 0 silently for `off`, unset, parse errors, missing files, or any other failure (fail-silent-on-error policy).

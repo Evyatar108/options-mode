@@ -9,6 +9,7 @@ const VALID_MODES = ['on', 'off', 'strict', 'auto'];
 const MAX_FLAG_BYTES = 64;
 const SESSION_FLAG_PREFIX = '.options-active-';
 const LEGACY_FLAG_NAME = '.options-active';
+const SESSION_FLAGS_SUBDIR = path.join('options-mode', 'sessions-configs');
 const MAX_LOG_BYTES = 64 * 1024;
 const OPTIONS_NO_QUESTION_TAG = '<options-mode>no-question</options-mode>';
 const OPTIONS_BACKGROUND_TASK_TAG = '<options-mode>background-task</options-mode>';
@@ -76,7 +77,7 @@ function sessionFlagSuffix(sessionId) {
 
 function getFlagPath(sessionId) {
   if (sessionId && typeof sessionId === 'string' && sessionId.length > 0) {
-    return path.join(getConfigRoot(), SESSION_FLAG_PREFIX + sessionFlagSuffix(sessionId));
+    return path.join(getConfigRoot(), SESSION_FLAGS_SUBDIR, sessionFlagSuffix(sessionId));
   }
   return path.join(getConfigRoot(), LEGACY_FLAG_NAME);
 }
@@ -306,6 +307,8 @@ function appendLog(line) {
 }
 
 module.exports = {
+  SESSION_FLAGS_SUBDIR,
+  sessionFlagSuffix,
   OPTIONS_NO_QUESTION_TAG,
   OPTIONS_BACKGROUND_TASK_TAG,
   OPTIONS_BACKGROUND_AGENT_TAG,

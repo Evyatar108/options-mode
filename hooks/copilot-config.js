@@ -3,11 +3,14 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 
 const VALID_MODES = ['on', 'off', 'strict', 'auto'];
 const MAX_FLAG_BYTES = 64;
 const MAX_LOG_BYTES = 64 * 1024;
 const FLAG_NAME = '.options-mode-active';
+const SESSION_FLAG_PREFIX = '.options-mode-active-';
+const SESSION_FLAGS_SUBDIR = path.join('options-mode', 'sessions-configs');
 const LOG_NAME = 'options-mode.log';
 // Copilot uses a CommonMark reference-link comment idiom so that markdown
 // renderers strip it from the rendered output. The previous `<!--...-->` HTML
@@ -84,6 +87,17 @@ function getFlagPath() {
   return path.join(getConfigRoot(), FLAG_NAME);
 }
 
+function sessionFlagSuffix(sessionId) {
+  return crypto.createHash('sha256').update(String(sessionId)).digest('hex').slice(0, 32);
+}
+
+function getSessionFlagPath(sessionId) {
+  if (sessionId && typeof sessionId === 'string' && sessionId.length > 0) {
+    return path.join(getConfigRoot(), SESSION_FLAGS_SUBDIR, sessionFlagSuffix(sessionId));
+  }
+  return getFlagPath();
+}
+
 function _readFlagInternal(flagPath) {
   let st;
   try {
@@ -121,17 +135,16 @@ function readFlag() {
   }
 }
 
-// Copilot has no env-var or options.json default fallback path — by v0.10.0
-// design the flag at <copilotConfigRoot>/.options-mode-active is the only
-// source of truth on this surface (Copilot CLI hooks did not carry session
-// state at the time, so per-session toggling was deferred and the flag is
-// machine-wide). The Claude Code mirror in hooks/config.js has env -> file ->
-// off precedence; that asymmetry is intentional and documented in CLAUDE.md.
-function getOptionsMode() {
-  // Mirror Claude-side fail-open semantics: on a real read error (not just
-  // missing file), return 'on' so enforcement stays active. _readFlagInternal
-  // throws on real fs errors and returns null on ENOENT/invalid content.
+// Per-session flag wins; falls back to machine-wide flag; falls back to 'off'.
+// sessionId is available in all hook stdin payloads (confirmed v0.12.0+).
+// Machine-wide flag (~/.copilot/.options-mode-active) remains for back-compat
+// and as the default when no per-session flag exists.
+function getOptionsMode(sessionId) {
   try {
+    if (sessionId && typeof sessionId === 'string' && sessionId.length > 0) {
+      const sessionMode = _readFlagInternal(getSessionFlagPath(sessionId));
+      if (sessionMode !== null) return sessionMode;
+    }
     const mode = _readFlagInternal(getFlagPath());
     return mode === null ? 'off' : mode;
   } catch (e) {
@@ -139,14 +152,21 @@ function getOptionsMode() {
   }
 }
 
-function isOptionsActive() {
-  const mode = getOptionsMode();
+function isOptionsActive(sessionId) {
+  const mode = getOptionsMode(sessionId);
   return mode === 'on' || mode === 'strict' || mode === 'auto';
 }
 
+function safeWriteSessionFlag(sessionId, content) {
+  _safeWriteFlagPath(getSessionFlagPath(sessionId), content);
+}
+
 function safeWriteFlag(content) {
+  _safeWriteFlagPath(getFlagPath(), content);
+}
+
+function _safeWriteFlagPath(flagPath, content) {
   try {
-    const flagPath = getFlagPath();
     const flagDir = path.dirname(flagPath);
     fs.mkdirSync(flagDir, { recursive: true });
 
@@ -219,12 +239,15 @@ module.exports = {
   OPTIONS_RULES_FOR_COPILOT_AUTO,
   VALID_MODES,
   FLAG_NAME,
+  SESSION_FLAG_PREFIX,
   getConfigRoot,
   getFlagPath,
+  getSessionFlagPath,
   readFlag,
   isOptionsActive,
   getOptionsMode,
   safeWriteFlag,
+  safeWriteSessionFlag,
   appendLog,
   readStdinJson
 };

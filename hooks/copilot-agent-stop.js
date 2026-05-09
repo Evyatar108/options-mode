@@ -114,8 +114,9 @@ function emitBlock(reason) {
     emitPass();
   }
 
+  const sessionId = stdin && stdin.sessionId;
   let mode = 'on';
-  try { mode = getOptionsMode(); } catch (e) {}
+  try { mode = getOptionsMode(sessionId); } catch (e) {}
   if (mode !== 'on' && mode !== 'strict' && mode !== 'auto') emitPass();
 
   const transcriptPath = stdin && (stdin.transcriptPath || stdin.transcript_path);

@@ -78,7 +78,7 @@ if ($SessionId) {
     } finally {
         $Hasher.Dispose()
     }
-    $SessionFlag = Join-Path $ClaudeDir (".options-active-$Suffix")
+    $SessionFlag = Join-Path $ClaudeDir "options-mode\sessions-configs\$Suffix"
     $Mode = Read-FlagFile -Path $SessionFlag
 } else {
     $LegacyFlag = Join-Path $ClaudeDir '.options-active'

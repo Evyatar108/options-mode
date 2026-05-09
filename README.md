@@ -69,7 +69,7 @@ Each mode uses specific tags as post-turn signals. Tags are substring-matched ag
 
 State files written under `<configRoot>` (default `~/.claude` for Claude Code, `~/.copilot` for Copilot CLI):
 
-- `.options-active-<sha256(session_id)[0:32]>` — per-session mode flag (`on`, `off`, `strict`, or `auto`).
+- `options-mode/sessions-configs/<sha256(session_id)[0:32]>` — per-session mode flag (`on`, `off`, `strict`, or `auto`). Directory created automatically on first write.
 - `.options-active` — legacy single-machine fallback (pre-v0.4.0 / no session_id).
 - `options.json` — global default (`{ "defaultMode": "on" }` etc.).
 - `.options-statusline-warn` — sentinel: suppress the one-time statusline setup reminder after first display.

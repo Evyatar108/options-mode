@@ -9,7 +9,7 @@
       "name": "options-mode",
       "source": ".",
       "description": "Options mode: choice-prompt enforcement hooks for Claude Code, repo-local Codex sessions, and GitHub Copilot CLI",
-      "version": "0.16.4"
+      "version": "0.16.11"
     }
   ]
 }
