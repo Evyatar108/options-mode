@@ -1,7 +1,7 @@
 {
   "name": "options-mode",
   "description": "Options mode: enforce ask_user choice prompts on every decision turn for GitHub Copilot CLI",
-  "version": "0.16.11",
+  "version": "0.16.12",
   "author": { "name": "Evyatar Mitrani" },
   "license": "MIT",
   "homepage": "https://github.com/Evyatar108/options-mode",

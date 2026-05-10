@@ -60,8 +60,11 @@ const manifest = JSON.parse(fs.readFileSync(path.join(root, 'plugins/options-mod
 if (manifest.skills !== './skills/') throw new Error(`bad skills field: ${manifest.skills}`);
 const codexSkillsDir = path.join(root, 'plugins/options-mode/.codex-plugin/skills/options-mode');
 if (!fs.existsSync(path.join(codexSkillsDir, 'SKILL.md'))) throw new Error('codex skill SKILL.md missing at .codex-plugin/skills/options-mode/');
-const claudeSkillsRoot = path.join(root, 'plugins/options-mode/skills');
-if (fs.existsSync(claudeSkillsRoot)) throw new Error('plugin-root skills/ must not exist (would expose skill to Claude Code, defeating the v0.9.0 hide-skill fix)');
+// v0.16.12 reversal: Claude Code requires a registered skill for slash command resolution.
+// Without skills/options-mode/SKILL.md, /options-mode shows "Unknown command" before
+// UserPromptSubmit hook can intercept. Skill body documents the hook-driven flow.
+const claudeSkillFile = path.join(root, 'plugins/options-mode/skills/options-mode/SKILL.md');
+if (!fs.existsSync(claudeSkillFile)) throw new Error('claude code skill SKILL.md missing at plugins/options-mode/skills/options-mode/');
 const required = ['displayName', 'shortDescription', 'category', 'capabilities'];
 for (const field of required) {
   const value = manifest.interface && manifest.interface[field];
